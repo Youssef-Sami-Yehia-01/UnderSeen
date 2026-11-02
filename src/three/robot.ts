@@ -60,6 +60,8 @@ export class Robot {
   leds: THREE.MeshBasicMaterial;
   props: THREE.Object3D[] = [];
   private blurMat: THREE.MeshBasicMaterial;
+  scanLine: THREE.Mesh;
+  private scanT = 0;
   u = 0.5; t = 0.6;
   onHull = false;
 
@@ -168,6 +170,12 @@ export class Robot {
     this.jetRing.position.y = -0.085;
     this.body.add(this.jetRing);
 
+    // scan line: the cameras' laser stripe on the hull just ahead of the robot
+    this.scanLine = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.95), new THREE.MeshBasicMaterial({ color: '#3FE6EA', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
+    this.scanLine.rotation.x = -Math.PI / 2;
+    this.scanLine.position.set(W / 2 + 0.22, -0.118, 0);
+    this.body.add(this.scanLine);
+
     this.spot = new THREE.SpotLight('#E8F7FA', 9, 6, 0.75, 0.6, 1.5);
     this.spot.position.set(W / 2 - 0.03, -0.08, 0);
     this.spotTarget.position.set(1.4, -0.9, 0);
@@ -204,6 +212,9 @@ export class Robot {
     // blades turn slowly enough to read; a soft disc stands in for the fast spin
     this.props.forEach((p) => { p.rotation.y += dt * (working ? 7 : 3); });
     this.blurMat.opacity = THREE.MathUtils.lerp(this.blurMat.opacity, working ? 0.32 : 0, 0.15);
+    this.scanT += dt;
+    const lm = this.scanLine.material as THREE.MeshBasicMaterial;
+    lm.opacity = THREE.MathUtils.lerp(lm.opacity, working ? 0.75 + 0.25 * Math.sin(this.scanT * 9) : 0.25, 0.2);
     const m = this.jetRing.material as THREE.MeshStandardMaterial;
     m.emissiveIntensity = THREE.MathUtils.lerp(m.emissiveIntensity, jetting ? 1.6 : 0, 0.2);
   }

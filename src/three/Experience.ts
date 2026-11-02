@@ -140,6 +140,8 @@ export class Experience {
   timeScale = 1;
   private used = false;
   private frameNo = 0;
+  private covTex: THREE.DataTexture | null = null;
+  private covSeen = 0;
 
   constructor(container: HTMLElement, ev: Events, initial?: Yacht) {
     this.container = container;
@@ -268,6 +270,12 @@ export class Experience {
     this.parts.group.add(this.fouling.mesh);
     this.scan = buildScanCloud(this.shape, y, this.parts.gearPoints);
     this.scan.points.visible = false;
+    // what has been cleaned has also been scanned: the coverage grid drives the point cloud
+    this.covTex?.dispose();
+    this.covTex = new THREE.DataTexture(this.fouling.cleaned, this.fouling.cellsU, this.fouling.cellsT, THREE.RedFormat, THREE.UnsignedByteType);
+    this.covTex.needsUpdate = true;
+    this.covSeen = 0;
+    this.scan.mat.uniforms.uCov.value = this.covTex;
     this.parts.group.add(this.scan.points, this.scan.sheet);
     this.scene.add(this.parts.group);
     this.tender.position.set(L * 0.05, 0, B / 2 + 2.8);
@@ -533,6 +541,10 @@ export class Experience {
         this.phase = 'clean';
         this.camMode = 'follow';
         this.cleanStart = this.clock.elapsedTime;
+        // the robot's cameras scan the hull while it cleans
+        const u = this.scan.mat.uniforms;
+        this.scan.points.visible = true;
+        u.uLive.value = 1; u.uAlpha.value = 0.6; u.uSweep.value = -100; u.uShowFind.value = 0;
         this.camTarget.copy(this.robot.group.position);
         this.ev.phase('clean');
       },
@@ -549,17 +561,20 @@ export class Experience {
     this.cleanSeconds = this.clock.elapsedTime - this.cleanStart;
     sound.setLoops({ brush: 0, jet: 0 });
     const { L, B, D } = this.shape;
+    // one last pass along the keel fills any gaps the cleaning rows left in the scan
     this.scan.points.visible = true;
     this.scan.sheet.visible = true;
     this.scan.mat.uniforms.uShowFind.value = 0;
+    this.scan.mat.uniforms.uLive.value = 0;
+    this.scan.mat.uniforms.uAlpha.value = 1;
     this.fouling.mesh.visible = true;
     const camPos = new THREE.Vector3(L * 0.1, -D - L * 0.3, B * 0.6 + L * 0.68);
     this.fogUnder.density = 0.03;
     const camTgt = new THREE.Vector3(0, -D * 0.55, 0);
     const p0 = this.camera.position.clone(), t0 = this.controls.target.clone();
-    sound.sweep(6.0);
+    sound.sweep(4.0);
     this.seq = {
-      start: this.clock.elapsedTime, dur: 7.0,
+      start: this.clock.elapsedTime, dur: 5.0,
       update: (k) => {
         const kc = Math.min(1, k / 0.18);
         const e = ease(kc);
@@ -824,6 +839,8 @@ export class Experience {
     r.animate(dt, this.activeTool === 'brush', this.activeTool === 'jet');
     sound.setLoops({ brush: this.activeTool === 'brush' ? 1 : 0, jet: this.activeTool === 'jet' ? 1 : 0 });
     this.fouling.flush();
+    if (this.covTex && this.fouling.cleanedCount !== this.covSeen) { this.covSeen = this.fouling.cleanedCount; this.covTex.needsUpdate = true; }
+    (this.scan.mat.uniforms.uRobot.value as THREE.Vector3).copy(r.group.position);
 
     // debris suction ring
     if (this.activeTool) {

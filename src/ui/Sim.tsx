@@ -194,10 +194,10 @@ export default function Sim() {
     if (stats.brushOnBarnacles) return { warn: true, el: <><b>The brush can't lift barnacles.</b> They are cemented to the hull. Switch to the cavitation jet.</> };
     if (stats.activeTool === 'jet') return { warn: false, el: <><b>Cavitation jet on.</b> Bubbles collapse against the shell and crack the cement without stripping the paint.</> };
     if (stats.activeTool === 'brush') return { warn: false, el: <><b>Brushing.</b> Soft nylon bristles lift the slime and weed. Suction pulls it into the filter, so nothing is left in the marina.</> };
-    if (canScan) return { warn: false, el: <><b>Hull clean.</b> Start the 3D scan to compare it with last month.</> };
+    if (canScan) return { warn: false, el: <><b>Hull clean and scanned.</b> Open the 3D scan to compare it with last month.</> };
     if (stats.coverage >= 0.8 && hardLeft) return { warn: true, el: <><b>Hard growth is still on the hull.</b> Barnacles need the jet. Turn on Autopilot to finish them.</> };
     if (stats.coverage > 0.35 && !auto) return { warn: false, el: <>Getting tired? Turn on <b>Autopilot</b> and the robot will finish the hull in rows.</> };
-    return { warn: false, el: <>Press and drag on the hull to steer the robot. The <b>Auto</b> tool switches to the jet when it finds barnacles.</> };
+    return { warn: false, el: <>Press and drag on the hull to steer the robot. Its cameras <b>3D-scan the hull as it cleans</b>; the Auto tool switches to the jet for barnacles.</> };
   }, [stats, canScan, auto, hardLeft]);
 
   const y = yacht;
@@ -212,7 +212,7 @@ export default function Sim() {
         {phase === 'clean' || phase === 'dive' || phase === 'scan' || phase === 'result' ? (
           <span className="live"><i />{phase === 'scan' ? '3D SCAN' : 'LIVE · ROBOT CAM'}<span className="sep" />{fmtTime(st?.seconds ?? 0)}</span>
         ) : phase === 'intro' ? (
-          <div className="brand"><img src="/logo-h-navy.png" alt="UNDERSEEN" /></div>
+          <div className="brand"><img src="/logo-h-white.png" alt="UNDERSEEN" /></div>
         ) : <span />}
         {phase !== 'app' && phase !== 'landing' && phase !== 'loading' && (
           <button className="iconbtn" onClick={toggleMute} aria-label={muted ? 'Turn sound on' : 'Turn sound off'}>
@@ -283,12 +283,12 @@ export default function Sim() {
               <button className="jet" aria-pressed={tool === 'jet'} onClick={() => { setTool('jet'); exp.current?.setTool('jet'); }}><Waves />Jet<span className="sub">barnacles</span></button>
             </div>
             <div className="meters one">
-              <div className="meter"><small>Hull cleaned <b>{st ? `${Math.round(st.areaM2)} of ${Math.round(st.totalM2)} m²` : '–'}</b></small><div className="bar"><i style={{ width: `${Math.round((st?.coverage ?? 0) * 100)}%` }} /></div></div>
+              <div className="meter"><small>Cleaned and scanned <b>{st ? `${Math.round(st.areaM2)} of ${Math.round(st.totalM2)} m²` : '–'}</b></small><div className="bar"><i style={{ width: `${Math.round((st?.coverage ?? 0) * 100)}%` }} /></div></div>
             </div>
             <div className={`tip${tip.warn ? ' warn' : ''}`}>{tip.warn ? <AlertTriangle /> : <Info />}<span>{tip.el}</span></div>
             <div className="actions">
               <button className="btn btn-ghost btn-toggle" aria-pressed={auto} onClick={() => { const v = !auto; setAuto(v); exp.current?.setAutopilot(v); if (v) setCam('follow'); }}><Bot />{auto ? 'Autopilot on' : 'Autopilot'}</button>
-              <button className="btn btn-primary" disabled={!canScan} onClick={startScan}><ScanLine />Start 3D scan</button>
+              <button className="btn btn-primary" disabled={!canScan} onClick={startScan}><ScanLine />See the 3D scan</button>
             </div>
           </div>
         </>
@@ -297,7 +297,7 @@ export default function Sim() {
       {phase === 'scan' && (
         <div className="scan-card glass">
           <h2>3D scan</h2>
-          <p>{scanK < 1 ? 'Cameras are building the 3D model of your hull…' : `Comparing with scan ${y?.previousScanNo}…`}</p>
+          <p>{scanK < 1 ? 'Last pass along the keel to finish the 3D model…' : `Comparing with scan ${y?.previousScanNo}…`}</p>
           <div className="bar"><i style={{ width: `${Math.round(scanK * 100)}%` }} /></div>
         </div>
       )}
@@ -332,7 +332,7 @@ export default function Sim() {
               <button className="notif" onClick={openApp} aria-label="Open the UNDERSEEN report">
                 <div className="top"><span className="ico"><img src="/favicon.svg" alt="" /></span>UNDERSEEN<span className="when">now</span></div>
                 <h3>Scan {y.scanNo} is ready · MY {y.name}</h3>
-                <p>Hull cleaned. <em>{y.findings.length} new {y.findings.length === 1 ? 'finding' : 'findings'}</em> since your last scan.</p>
+                <p>Hull cleaned and scanned. <em>{y.findings.length} new {y.findings.length === 1 ? 'finding' : 'findings'}</em> since your last scan.</p>
               </button>
               <div className="hint">Tap the notification<i /></div>
             </div>

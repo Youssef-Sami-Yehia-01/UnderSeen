@@ -2,10 +2,14 @@ import * as THREE from 'three';
 import { HullShape } from './hull';
 import { mulberry32, type Yacht } from '../lib/yacht';
 
-/** Point cloud of the hull revealed by a moving laser sheet. */
+/**
+ * Point cloud of the hull. Points appear as the robot cleans (coverage texture, sampled by (u, t)),
+ * and a final sweep fills any gaps before the result.
+ */
 export function buildScanCloud(shape: HullShape, y: Yacht, gear: THREE.Vector3[], count = 32000) {
   const r = mulberry32(y.seed ^ 0x5ca);
-  const pos: number[] = [], find: number[] = [], depth: number[] = [];
+  const pos: number[] = [], find: number[] = [], depth: number[] = [], ut: number[] = [];
+  const gearUT = (p: THREE.Vector3) => [Math.min(0.99, Math.max(0.01, p.x / shape.L + 0.5)), Math.sign(p.z || 1) * 0.3];
   const tmp = new THREE.Vector3(), n = new THREE.Vector3();
   for (let i = 0; i < count; i++) {
     const u = r(), t = r() * 2 - 1;
@@ -21,6 +25,7 @@ export function buildScanCloud(shape: HullShape, y: Yacht, gear: THREE.Vector3[]
     pos.push(tmp.x, tmp.y, tmp.z);
     find.push(f);
     depth.push(1 - Math.pow(Math.abs(t), 1.25));
+    ut.push(u, t);
   }
   // extra density on findings so they read clearly
   for (const fd of y.findings) {
@@ -28,45 +33,54 @@ export function buildScanCloud(shape: HullShape, y: Yacht, gear: THREE.Vector3[]
     for (let i = 0; i < 700; i++) {
       const u = fd.u + (r() - 0.5) * 0.035, t = Math.max(-1, Math.min(1, fd.t + (r() - 0.5) * 0.12));
       shape.under(u, t, tmp);
-      pos.push(tmp.x, tmp.y, tmp.z); find.push(1); depth.push(0.7);
+      pos.push(tmp.x, tmp.y, tmp.z); find.push(1); depth.push(0.7); ut.push(u, t);
     }
   }
   // running gear
   for (const g of gear) {
     for (let k = 0; k < 14; k++) {
       pos.push(g.x + (r() - 0.5) * 0.08, g.y + (r() - 0.5) * 0.08, g.z + (r() - 0.5) * 0.08);
-      find.push(0); depth.push(1);
+      find.push(0); depth.push(1); ut.push(...gearUT(g));
     }
   }
   for (const fd of y.findings) {
     if (fd.kind !== 'propeller' && fd.kind !== 'rope') continue;
     const target = gear[fd.side === 'port' ? (fd.kind === 'propeller' ? 40 : 35) : fd.kind === 'propeller' ? 81 : 76];
     if (!target) continue;
-    for (let k = 0; k < 500; k++) { pos.push(target.x + (r() - 0.5) * 0.4, target.y + (r() - 0.5) * 0.4, target.z + (r() - 0.5) * 0.4); find.push(1); depth.push(1); }
+    for (let k = 0; k < 500; k++) { pos.push(target.x + (r() - 0.5) * 0.4, target.y + (r() - 0.5) * 0.4, target.z + (r() - 0.5) * 0.4); find.push(1); depth.push(1); ut.push(...gearUT(target)); }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('aFind', new THREE.Float32BufferAttribute(find, 1));
   geo.setAttribute('aDepth', new THREE.Float32BufferAttribute(depth, 1));
+  geo.setAttribute('aUT', new THREE.Float32BufferAttribute(ut, 2));
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uSweep: { value: -100 }, uTime: { value: 0 }, uShowFind: { value: 0 }, uSize: { value: 2.4 }, uPR: { value: 1 }, uAlpha: { value: 1 } },
+    uniforms: {
+      uSweep: { value: -100 }, uTime: { value: 0 }, uShowFind: { value: 0 }, uSize: { value: 2.4 }, uPR: { value: 1 }, uAlpha: { value: 1 },
+      uCov: { value: null as THREE.Texture | null }, uLive: { value: 0 }, uRobot: { value: new THREE.Vector3(0, 100, 0) },
+    },
     transparent: true,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     vertexShader: /* glsl */ `
       uniform float uSweep; uniform float uTime; uniform float uShowFind; uniform float uSize; uniform float uPR;
-      attribute float aFind; attribute float aDepth;
+      uniform sampler2D uCov; uniform float uLive; uniform vec3 uRobot;
+      attribute float aFind; attribute float aDepth; attribute vec2 aUT;
       varying vec3 vCol; varying float vA;
       void main(){
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         float d = uSweep - position.x;
-        float seen = step(0.0, d);
-        float edge = exp(-d*d*6.0) * seen;
+        // scanned where the robot has cleaned, or behind the final sweep
+        float cov = texture2D(uCov, vec2(aUT.x, aUT.y * 0.5 + 0.5)).r;
+        float seen = max(step(0.0, d), step(0.002, cov));
+        float edge = exp(-d*d*6.0) * step(0.0, d);
+        vec3 dr = position - uRobot;
+        float fresh = exp(-dot(dr, dr) * 3.0) * uLive * seen;
         vec3 base = mix(vec3(0.10, 0.55, 0.62), vec3(0.55, 0.95, 0.97), aDepth);
         vec3 coral = vec3(1.0, 0.42, 0.29) * (0.75 + 0.25 * sin(uTime * 6.0));
-        vCol = mix(base, coral, aFind * uShowFind) + edge * vec3(0.6, 1.0, 1.0);
-        vA = seen * (0.55 + 0.45 * aDepth) + edge;
-        gl_PointSize = uSize * uPR * (1.0 + edge * 1.5 + aFind * uShowFind * 0.8) * (7.0 / -mv.z);
+        vCol = mix(base, coral, aFind * uShowFind) + (edge + fresh) * vec3(0.6, 1.0, 1.0);
+        vA = seen * (0.55 + 0.45 * aDepth) + edge + fresh;
+        gl_PointSize = uSize * uPR * (1.0 + (edge + fresh) * 1.5 + aFind * uShowFind * 0.8) * (7.0 / -mv.z);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */ `

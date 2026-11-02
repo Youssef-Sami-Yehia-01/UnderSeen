@@ -130,6 +130,17 @@ function screenGlass(H: House, f0: number, f1: number, widthFrac = 0.86) {
   });
 }
 
+/** Glass panel following the crowned roof of a house between xa and xb. */
+function roofGlass(H: House, xa: number, xb: number, widthFrac = 0.55) {
+  return gridGeometry(nq(10), nq(6, 2), (a, b, o) => {
+    const x = xa + (xb - xa) * a;
+    const d = dims(H, x);
+    const z = (b * 2 - 1) * (d.wt - d.rc) * widthFrac;
+    const k = z / Math.max(1e-6, d.wt - d.rc);
+    o.set(x, H.base(x) + d.hh + (H.crown ?? 0.04) * (1 - k * k) + 0.014, z);
+  });
+}
+
 /* ------------------------------------------------------------------ */
 function nameTexture(name: string, port: string, color: string) {
   const c = document.createElement('canvas');
@@ -298,7 +309,8 @@ export function buildYacht(y: Yacht, skin: THREE.Texture, opts: { detail?: 'high
   const saloonX0 = style === 'sport' ? -0.2 * L : style === 'explorer' ? -0.3 * L : -0.27 * L;
   add(
     gridGeometry(nu, tiny ? 4 : 16, (a, b, o) => shape.deck(a, -1 + 2 * b, o)),
-    track(new THREE.MeshStandardMaterial({ map: track(deckTexture(uOf(saloonX0) - 0.005, 0.72)), roughness: 0.62 })),
+    // the deck grid winds downwards: draw both faces so the cockpit and side decks are solid from above
+    track(new THREE.MeshStandardMaterial({ map: track(deckTexture(uOf(saloonX0) - 0.005, 0.72)), roughness: 0.62, side: THREE.DoubleSide })),
   );
 
   // stainless rails along the side decks and round the bow
@@ -420,7 +432,7 @@ export function buildYacht(y: Yacht, skin: THREE.Texture, opts: { detail?: 'high
     const ht: House = { x0: htAft, x1: cabin.x0 + 0.6, rf: cabin.x0 + 0.6, h: 0.11, base: () => topY - 0.06, half: (x) => houseHalf(sideDeck)(Math.max(cabin.x0, x)) * 0.94, tumble: 1, rc: 0.05, crown: 0.06 };
     add(houseGeo(ht, ht.x0, ht.x1, 16, 20), superMat);
     add(houseCap(ht, ht.x0, 20), superMat);
-    add(new THREE.BoxGeometry(cabin.rf - cabin.x0 - 1.0, 0.02, houseHalf(sideDeck)(0) * 1.1), glassMat, new THREE.Vector3((cabin.x0 + cabin.rf) / 2 - 0.3, topY + 0.07, 0));
+    add(roofGlass(cabin, cabin.x0 + 0.9, cabin.rf - 0.4), glassMat);
     add(houseCap(cabin, cabin.x0), glassMat);
     for (const side of [-1, 1]) {
       const a = new THREE.Vector3(htAft + 0.35, deckY(htAft) + 0.4, side * houseHalf(sideDeck)(cabin.x0) * 0.9), b = new THREE.Vector3(htAft + 0.2, topY - 0.05, side * houseHalf(sideDeck)(cabin.x0) * 0.88);

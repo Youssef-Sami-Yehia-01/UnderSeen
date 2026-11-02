@@ -236,8 +236,8 @@ export class Marina {
     this.group.add(this.shore);
 
     /* yachts moored further away */
-    const bodyMat = T(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0 }));
-    const glassMat = T(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.06, metalness: 0.7 }));
+    const bodyMat = T(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0, side: THREE.DoubleSide }));
+    const glassMat = T(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.06, metalness: 0.7, side: THREE.DoubleSide }));
     for (const name of ['row-fly', 'row-sport', 'row-exp']) {
       let y = makeYacht(name);
       let guard = 0;

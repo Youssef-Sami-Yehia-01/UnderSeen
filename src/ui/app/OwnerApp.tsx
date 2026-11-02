@@ -310,7 +310,7 @@ function TimeLapse({ y, plans, levels }: { y: Yacht; plans: string[]; levels: Ap
             <line x1="0" x2={W} y1={B} y2={B} stroke="#E2DFD8" />
             {levels.growth.map((g, k) => {
               const h = Math.max(4, g * (B - T));
-              return <rect key={k} x={xs(k) - 8} y={B - h} width="16" height={h} fill={k === i ? '#0A2233' : '#9DCFD2'} />;
+              return <rect key={k} x={xs(k) - 8} y={B - h} width="16" height={h} rx="3" fill={k === i ? '#0A2233' : '#9DCFD2'} />;
             })}
             {levels.months.map((m, k) => <text key={k} x={xs(k)} y={H - 3} textAnchor="middle" className={k === i ? 'on' : ''}>{m}</text>)}
           </svg>
@@ -357,21 +357,21 @@ function Berth({ y, notify }: { y: Yacht; notify: (t: string, b: string) => void
         </div>
         <section className="card pad-s">
           <svg className="marina" viewBox="0 0 340 236" role="img" aria-label={`Map of pontoon ${y.pontoon}`}>
-            <rect x="0" y="0" width="340" height="236" fill="#EAF3F4" />
+            <rect x="0" y="0" width="340" height="236" rx="10" fill="#EAF3F4" />
             {Array.from({ length: 6 }, (_, k) => <path key={k} d={`M0 ${150 + k * 15} Q 85 ${144 + k * 15} 170 ${150 + k * 15} T 340 ${150 + k * 15}`} fill="none" stroke="rgba(11,127,132,.08)" />)}
-            <rect x="14" y="30" width="312" height="16" fill="#D9CFC0" />
+            <rect x="14" y="30" width="312" height="16" rx="4" fill="#D9CFC0" />
             <text x="16" y="22" fontSize="10.5" fontWeight="700" fill="#8E8A82" letterSpacing="1">PONTOON {y.pontoon}</text>
             {berths.map((b, k) => {
               const x = 34 + k * 44, me = b === my;
               return (
                 <g key={b}>
-                  <rect x={x - 2} y="46" width="4" height="76" fill="#C9C1B4" />
+                  <rect x={x - 2} y="46" width="4" height="76" rx="1" fill="#C9C1B4" />
                   {k < berths.length - 1 && (
                     <>
                       <path d={`M${x + 22} 56 l -13 0 q -7 24 0 56 l 13 7 l 13 -7 q 7 -32 0 -56 z`} fill={me ? '#0B7F84' : '#FFFFFF'} stroke={me ? '#0B7F84' : '#D8D4CC'} strokeWidth="1.2" />
                       <text x={x + 22} y="142" textAnchor="middle" fontSize={me ? 11.5 : 10} fontWeight={me ? 700 : 500} fill={me ? '#0B7F84' : '#9A968E'}>{y.pontoon}-{String(b).padStart(2, '0')}</text>
                       <path d={`M${x + 22} 121 Q ${x + 31} 170 ${x + 25} 204`} fill="none" stroke={me ? '#0B7F84' : '#CFCAC1'} strokeDasharray="2 4" strokeWidth="1.5" />
-                      <rect x={x + 17} y="204" width="16" height="8" fill={me ? '#0B7F84' : '#CFCAC1'} />
+                      <rect x={x + 17} y="204" width="16" height="8" rx="2" fill={me ? '#0B7F84' : '#CFCAC1'} />
                     </>
                   )}
                 </g>

@@ -117,6 +117,8 @@ export class FoulingSystem {
     this.ctx.drawImage(this.clean, 0, 0);
     this.paintGrowth(this.ctx);
     this.texture = new THREE.CanvasTexture(this.skin);
+    // canvas rows run top-down in t, the hull's uv.y runs bottom-up in t: no flip, or every clean lands on the other side of the keel
+    this.texture.flipY = false;
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.anisotropy = 8;
     this.cleaned = new Uint8Array(this.cellsU * this.cellsT);

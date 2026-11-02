@@ -182,9 +182,11 @@ export default function Sim() {
       {/* landing: photo first, the 3D starts after the name */}
       {(phase === 'landing' || phase === 'loading') && (
         <div className="landing">
-          <img className="landing-photo" src={LANDING_PHOTO.src} alt={LANDING_PHOTO.alt} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-          <div className="landing-shade" />
-          <header className="landing-top"><img src="/logo-h-white.png" alt="UNDERSEEN" /></header>
+          <header className="landing-top"><img src="/logo-h-navy.png" alt="UNDERSEEN" /></header>
+          <figure className="landing-figure">
+            <img className="landing-photo" src={LANDING_PHOTO.src} alt={LANDING_PHOTO.alt} onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
+            <figcaption className="landing-credit">Photo: {LANDING_PHOTO.credit}</figcaption>
+          </figure>
           <form className="landing-copy" onSubmit={submitName}>
             <div className="landing-eyebrow">Yachting &amp; marine · Hurghada, Red Sea</div>
             <h1 className="landing-title">Dive under your yacht.</h1>
@@ -196,7 +198,6 @@ export default function Sim() {
             </div>
             <p className="landing-fine">Every name gets a different yacht with its own problems. Turn your sound on.</p>
           </form>
-          <span className="landing-credit">Photo: {LANDING_PHOTO.credit}</span>
         </div>
       )}
 

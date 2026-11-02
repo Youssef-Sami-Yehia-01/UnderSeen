@@ -59,6 +59,7 @@ export class Robot {
   private tetherFrame = 0;
   leds: THREE.MeshBasicMaterial;
   props: THREE.Object3D[] = [];
+  private blurMat: THREE.MeshBasicMaterial;
   u = 0.5; t = 0.6;
   onHull = false;
 
@@ -105,6 +106,9 @@ export class Robot {
     const lip = new THREE.TorusGeometry(0.075, 0.009, 8, 28); lip.rotateX(Math.PI / 2);
     const hub = new THREE.CylinderGeometry(0.02, 0.024, 0.05, 10);
     const blade = new THREE.BoxGeometry(0.12, 0.004, 0.026);
+    // blur disc shown while the props spin fast (spinning blades strobe at phone frame rates)
+    this.blurMat = new THREE.MeshBasicMaterial({ color: '#C9D3D8', transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+    const blurGeo = new THREE.CircleGeometry(0.066, 28); blurGeo.rotateX(-Math.PI / 2);
     for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
       const g = new THREE.Group();
       g.add(new THREE.Mesh(duct, new THREE.MeshStandardMaterial({ color: '#14191D', roughness: 0.6, side: THREE.DoubleSide })));
@@ -112,12 +116,16 @@ export class Robot {
       g.add(new THREE.Mesh(hub, alu));
       const pr = new THREE.Group();
       for (let k = 0; k < 3; k++) { const b = new THREE.Mesh(blade, alu); b.rotation.y = (k * Math.PI * 2) / 3; b.rotation.x = 0.4; pr.add(b); }
+      pr.position.y = -0.008;
       g.add(pr);
       this.props.push(pr);
+      const disc = new THREE.Mesh(blurGeo, this.blurMat);
+      disc.position.y = 0.012; disc.renderOrder = 2;
+      g.add(disc);
       g.position.set(sx * (W / 2 - 0.05), -0.02, sz * (D / 2 - 0.05));
-      // small strut to the chassis
-      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.02), darkMat);
-      strut.position.set(-sx * 0.06, 0, -sz * 0.06); strut.rotation.y = sx * sz * Math.PI / 4;
+      // strut from the duct wall to the chassis, outside the blades
+      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 0.02), darkMat);
+      strut.position.set(-sx * 0.07, 0.02, -sz * 0.07); strut.rotation.y = sx * sz * Math.PI / 4;
       g.add(strut);
       this.body.add(g);
     }
@@ -193,7 +201,9 @@ export class Robot {
   animate(dt: number, brushing: boolean, jetting: boolean) {
     const working = brushing || jetting;
     this.brush.rotation.y += dt * (working ? 22 : 2);
-    this.props.forEach((p) => { p.rotation.y += dt * (working ? 30 : 8); });
+    // blades turn slowly enough to read; a soft disc stands in for the fast spin
+    this.props.forEach((p) => { p.rotation.y += dt * (working ? 7 : 3); });
+    this.blurMat.opacity = THREE.MathUtils.lerp(this.blurMat.opacity, working ? 0.32 : 0, 0.15);
     const m = this.jetRing.material as THREE.MeshStandardMaterial;
     m.emissiveIntensity = THREE.MathUtils.lerp(m.emissiveIntensity, jetting ? 1.6 : 0, 0.2);
   }

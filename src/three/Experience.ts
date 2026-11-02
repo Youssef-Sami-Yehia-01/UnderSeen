@@ -5,12 +5,13 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import {
-  SUN_DIR, UNDERWATER_COLOR, causticUniforms, makeWater, makeSky, makeSeabed, makeLightShafts, makeMarineSnow,
-  makePontoon, makeMountains, makeTender, makeMooring, makeFish, SEABED_Y,
+  SUN_DIR, UNDERWATER_COLOR, causticUniforms, makeWater, makeWaterAbove, makeSky, makeSeabed, makeLightShafts, makeMarineSnow,
+  makePontoon, makeTender, makeMooring, makeFish, SEABED_Y,
 } from './environment';
+import { Marina, makeMountains } from './marina';
 import { buildYacht, type YachtParts } from './yachtModel';
 import { FoulingSystem, type Tool } from './fouling';
-import { HullShape } from './hull';
+import { HullShape, hullOpts } from './hull';
 import { Robot } from './robot';
 import { buildScanCloud } from './scan';
 import { makeYacht, mulberry32, type Yacht, type Finding } from '../lib/yacht';
@@ -78,6 +79,8 @@ export class Experience {
   snow = makeMarineSnow();
   fish = makeFish();
   mountains = makeMountains();
+  marina = new Marina();
+  waterAbove = makeWaterAbove(isTouch);
   pontoon = makePontoon(0);
   tender = makeTender();
   hemi = new THREE.HemisphereLight('#D8ECF7', '#4B5A4F', 0.75);
@@ -85,7 +88,7 @@ export class Experience {
   fill = new THREE.DirectionalLight('#7FD0D8', 0);
   envAbove: THREE.Texture;
   envUnder: THREE.Texture;
-  fogAbove = new THREE.Fog('#E3D3C3', 500, 3200);
+  fogAbove = new THREE.Fog('#DCD3C8', 900, 7000);
   fogUnder = new THREE.FogExp2('#1E5F6D', 0.075);
   private waterDome: THREE.Mesh;
   private camSide = 1;
@@ -136,6 +139,7 @@ export class Experience {
   heroImage = '';
   timeScale = 1;
   private used = false;
+  private frameNo = 0;
 
   constructor(container: HTMLElement, ev: Events, initial?: Yacht) {
     this.container = container;
@@ -145,6 +149,10 @@ export class Experience {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.62;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // sun shadows on decks, the pontoon and the water; redrawn every few frames above water only
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.style.touchAction = 'none';
 
@@ -171,7 +179,16 @@ export class Experience {
     s.fog = this.fogAbove;
     this.fill.position.set(10, -60, 25);
     this.sun.position.copy(SUN_DIR).multiplyScalar(120);
-    s.add(this.hemi, this.sun, this.fill, this.sky, this.water.mesh, this.seabed.group, this.shafts, this.snow, this.fish.fish, this.mountains, this.pontoon, this.tender);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(isTouch ? 1024 : 2048, isTouch ? 1024 : 2048);
+    const sc = this.sun.shadow.camera;
+    sc.left = -30; sc.right = 30; sc.top = 30; sc.bottom = -30; sc.near = 40; sc.far = 220;
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.03;
+    this.water.mesh.visible = false;
+    s.add(this.hemi, this.sun, this.fill, this.sky, this.water.mesh, this.waterAbove, this.seabed.group, this.shafts, this.snow, this.fish.fish, this.mountains, this.marina.group, this.pontoon, this.tender);
+    this.seabed.group.visible = false;
+    this.fish.fish.visible = false;
     s.add(this.robot.group, this.robot.tether);
     // underwater sky: lighter toward the surface, dark below, follows the camera
     this.waterDome = new THREE.Mesh(new THREE.SphereGeometry(80, 32, 16), new THREE.ShaderMaterial({
@@ -242,22 +259,27 @@ export class Experience {
     }
     if (this.mooring) { this.scene.remove(this.mooring); this.mooring = null; }
     this.yacht = y;
-    this.shape = new HullShape(y.lengthM, y.beamM);
+    this.shape = new HullShape(y.lengthM, y.beamM, hullOpts(y.style));
+    const { L, B, D } = this.shape;
+    // moored stern-to: 1 m swim platform, a 1.5 m gap for the passerelle, then the 2.4 m pontoon
+    this.pontoon.position.x = -L / 2 - 1.0 - 1.5 - 1.2;
     this.fouling = new FoulingSystem(y, this.shape);
-    this.parts = buildYacht(y, this.fouling.texture);
+    this.parts = buildYacht(y, this.fouling.texture, { dockX: this.pontoon.position.x + 1.2 });
     this.parts.group.add(this.fouling.mesh);
     this.scan = buildScanCloud(this.shape, y, this.parts.gearPoints);
     this.scan.points.visible = false;
     this.parts.group.add(this.scan.points, this.scan.sheet);
     this.scene.add(this.parts.group);
-    const { L, B, D } = this.shape;
-    this.pontoon.position.x = -L / 2 - 1.0 - 1.25;
     this.tender.position.set(L * 0.05, 0, B / 2 + 2.8);
     this.tender.rotation.y = 0.15;
-    this.mooring = makeMooring(new THREE.Vector3(L / 2 + L * 0.06, 0.4, 0), new THREE.Vector3(L / 2 + 10, SEABED_Y - 0.2, 0));
+    this.mooring = makeMooring(this.parts.bowLine.clone(), new THREE.Vector3(L / 2 + 10, SEABED_Y - 0.2, 0));
     this.scene.add(this.mooring);
     this.fish.fish.position.set(L * 0.1, 0, 0);
     this.buildNeighbours();
+    this.mooring.visible = this.underwater;
+    this.fouling.mesh.visible = this.underwater;
+    this.parts.underMesh.visible = this.underwater;
+    this.renderer.shadowMap.needsUpdate = true;
     this.controls.target.set(0, 1.4, 0);
     const R = L * 1.45 + 6;
     if (landing) this.camera.position.set(R * 0.9, L * 0.3 + 3, R * 0.42);
@@ -268,27 +290,30 @@ export class Experience {
     this.robot.tether.visible = false;
     this.particles = [];
     this.shots = {};
-    void D;
+    void D; void B;
   }
 
   private buildNeighbours() {
     this.neighbours.forEach((n) => { this.scene.remove(n.group); n.dispose(); });
     this.neighbours = [];
     const px = this.pontoon.position.x;
+    const rowX = px + 1.2 + 1.5 + 1.0; // transoms of the boats on our side
     let zPos = this.shape.B / 2 + 0.9, zNeg = -this.shape.B / 2 - 0.9;
     ['harbour-1', 'harbour-2', 'harbour-3', 'harbour-4'].forEach((name, i) => {
       const ny = makeYacht(name + this.yacht.seed);
       ny.findings = [];
-      const n = buildYacht(ny, simpleSkin(ny), { detail: 'low' });
       const side = i % 2 ? -1 : 1;
+      if (i === 0) zPos += 5.4; // leave room for the tender
+      const nx = rowX + ny.lengthM / 2;
+      const n = buildYacht(ny, simpleSkin(ny), { detail: 'low', dockX: px + 1.2 - nx });
       const z = side > 0 ? zPos + ny.beamM / 2 : zNeg - ny.beamM / 2;
       if (side > 0) zPos = z + ny.beamM / 2 + 0.9; else zNeg = z - ny.beamM / 2 - 0.9;
-      n.group.position.set(px + 1.25 + 1.0 + ny.lengthM / 2, 0, z + (side > 0 && i === 0 ? 3.2 : 0));
-      if (i === 0) n.group.position.z += 2.6; // leave room for the tender
+      n.group.position.set(nx, 0, z);
       this.scene.add(n.group);
       n.group.visible = !this.underwater;
       this.neighbours.push(n);
     });
+    this.marina.layout(px, rowX, zPos, zNeg);
   }
 
   /* ----------------------------------------------------------------- */
@@ -315,6 +340,16 @@ export class Experience {
     this.waterDome.visible = u;
     // below the surface only your yacht is shown, so its hull never gets confused with the next berth
     this.neighbours.forEach((n) => { n.group.visible = !u; });
+    this.marina.group.visible = !u;
+    // things only seen below the surface stay out of the above-water frame (and its reflection)
+    this.seabed.group.visible = u;
+    this.fish.fish.visible = u;
+    if (this.mooring) this.mooring.visible = u;
+    this.fouling.mesh.visible = u;
+    this.parts.underMesh.visible = u;
+    this.waterAbove.visible = !u;
+    this.water.mesh.visible = u;
+    if (!u) this.renderer.shadowMap.needsUpdate = true;
     s.environment = u ? this.envUnder : this.envAbove;
     this.sky.visible = !u;
     this.mountains.visible = !u;
@@ -324,8 +359,8 @@ export class Experience {
     this.hemi.color.set(u ? '#7FD3DC' : '#D8ECF7');
     this.hemi.groundColor.set(u ? '#2F7380' : '#4B5A4F');
     this.hemi.intensity = u ? 1.5 : 0.75;
-    this.sun.intensity = u ? 0.8 : 2.2;
-    this.sun.color.set(u ? '#9EE3EA' : '#FFE2C0');
+    this.sun.intensity = u ? 0.8 : 2.6;
+    this.sun.color.set(u ? '#9EE3EA' : '#FFF1DE');
     this.fill.intensity = u ? 1.1 : 0;
     s.environmentIntensity = u ? 0.9 : 0.55;
     this.renderer.toneMappingExposure = u ? 1.0 : 0.62;
@@ -886,6 +921,7 @@ export class Experience {
     if (this.phase === 'dive' || this.phase === 'scan') this.robot.animate(dt, false, false);
 
     this.setUnderwater(this.camera.position.y < 0);
+    if (!this.underwater && this.frameNo++ % 4 === 0) this.renderer.shadowMap.needsUpdate = true;
     this.snow.position.copy(this.camera.position);
     this.waterDome.position.copy(this.camera.position);
     this.shafts.children.forEach((m, i) => { m.rotation.z = 0.3 + Math.sin(t * 0.15 + i) * 0.06; });

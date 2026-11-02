@@ -1,8 +1,12 @@
 import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import { Water } from 'three/examples/jsm/objects/Water.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeByMaterial } from './merge';
 import { mulberry32 } from '../lib/yacht';
 
-export const SUN_DIR = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 16), THREE.MathUtils.degToRad(215));
+// mid-morning sun from the east-south-east over the Red Sea, lighting the yachts and the hills from the camera's side
+export const SUN_DIR = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 38), THREE.MathUtils.degToRad(110));
 export const UNDERWATER_COLOR = new THREE.Color('#0B4658');
 export const UNDERWATER_DEEP = new THREE.Color('#03202C');
 export const SEABED_Y = -5.6;
@@ -155,12 +159,65 @@ export function makeSky() {
   const sky = new Sky();
   sky.scale.setScalar(4500);
   const u = sky.material.uniforms;
-  u.turbidity.value = 5.5;
-  u.rayleigh.value = 1.4;
-  u.mieCoefficient.value = 0.004;
-  u.mieDirectionalG.value = 0.82;
+  u.turbidity.value = 1.8;
+  u.rayleigh.value = 1.9;
+  u.mieCoefficient.value = 0.003;
+  u.mieDirectionalG.value = 0.8;
   u.sunPosition.value.copy(SUN_DIR).multiplyScalar(1000);
   return sky;
+}
+
+/** Tileable ripple normals for the marina water (sum of waves with whole-number wave vectors). */
+function rippleNormals(size = 256) {
+  const r = mulberry32(404);
+  const waves: { kx: number; ky: number; a: number; ph: number }[] = [];
+  while (waves.length < 48) {
+    const kx = Math.round((r() - 0.5) * 44), ky = Math.round((r() - 0.5) * 44);
+    const k = Math.hypot(kx, ky);
+    if (k < 3) continue;
+    waves.push({ kx, ky, a: 1 / Math.pow(k, 1.35), ph: r() * Math.PI * 2 });
+  }
+  const data = new Uint8Array(size * size * 4);
+  for (let j = 0; j < size; j++) {
+    for (let i = 0; i < size; i++) {
+      const x = i / size, y = j / size;
+      let dx = 0, dy = 0;
+      for (const w of waves) {
+        const c = Math.cos(2 * Math.PI * (w.kx * x + w.ky * y) + w.ph) * w.a * 2 * Math.PI;
+        dx += c * w.kx; dy += c * w.ky;
+      }
+      const n = new THREE.Vector3(-dx * 0.012, -dy * 0.012, 1).normalize();
+      const o = (j * size + i) * 4;
+      data[o] = (n.x * 0.5 + 0.5) * 255; data[o + 1] = (n.y * 0.5 + 0.5) * 255; data[o + 2] = (n.z * 0.5 + 0.5) * 255; data[o + 3] = 255;
+    }
+  }
+  const t = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.needsUpdate = true;
+  return t;
+}
+
+/** Marina water seen from above: real reflections of the yachts, sky and town, rippled. */
+export function makeWaterAbove(mobile: boolean) {
+  const w = new Water(new THREE.PlaneGeometry(6000, 6000), {
+    textureWidth: mobile ? 512 : 1024,
+    textureHeight: mobile ? 512 : 1024,
+    waterNormals: rippleNormals(),
+    sunDirection: SUN_DIR.clone(),
+    sunColor: 0xfff3dd,
+    waterColor: 0x1f8f8c,
+    distortionScale: 1.4,
+    fog: true,
+  });
+  // Red Sea marina water is clear turquoise: reflect strongly only at grazing angles
+  w.material.fragmentShader = w.material.fragmentShader.replace('float rf0 = 0.3;', 'float rf0 = 0.08;');
+  w.rotation.x = -Math.PI / 2;
+  w.material.uniforms.size.value = 5;
+  w.receiveShadow = true;
+  return w;
 }
 
 /** Simple value noise for terrain. */
@@ -275,112 +332,160 @@ export function makeMarineSnow() {
   for (let i = 0; i < N; i++) { pos[i * 3] = (r() - 0.5) * 30; pos[i * 3 + 1] = (r() - 0.5) * 14; pos[i * 3 + 2] = (r() - 0.5) * 30; }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const mat = new THREE.PointsMaterial({ color: '#CFEFF0', size: 0.035, transparent: true, opacity: 0.55, depthWrite: false, sizeAttenuation: true });
+  // soft round specks (plain points are squares, which show when one drifts past the lens)
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const x = c.getContext('2d')!;
+  const grad = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(0.5, 'rgba(255,255,255,.5)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = grad; x.fillRect(0, 0, 32, 32);
+  const dot = new THREE.CanvasTexture(c);
+  const mat = new THREE.PointsMaterial({ color: '#CFEFF0', size: 0.035, map: dot, transparent: true, opacity: 0.55, depthWrite: false, sizeAttenuation: true });
   const pts = new THREE.Points(geo, mat);
   pts.frustumCulled = false;
   return pts;
 }
 
-/** Floating pontoon with piles, on which the yacht is moored stern-to. */
+/** Floating concrete pontoon with timber edges, cleats, power pedestals and steel piles. */
 export function makePontoon(atX: number) {
   const g = new THREE.Group();
-  const deckMat = new THREE.MeshStandardMaterial({ color: '#B49A78', roughness: 0.75 });
-  const floatMat = addCaustics(new THREE.MeshStandardMaterial({ color: '#4E585D', roughness: 0.85 }), 0.25);
-  const pileMat = addCaustics(new THREE.MeshStandardMaterial({ color: '#6B7378', roughness: 0.7, metalness: 0.2 }), 0.35);
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.18, 70), deckMat);
-  deck.position.set(atX, 0.42, 0);
-  g.add(deck);
-  const plankMat = new THREE.MeshStandardMaterial({ color: '#8C7356', roughness: 0.9 });
-  for (let i = -34; i <= 34; i += 0.5) {
-    const p = new THREE.Mesh(new THREE.BoxGeometry(2.38, 0.02, 0.04), plankMat);
-    p.position.set(atX, 0.52, i);
-    g.add(p);
-  }
-  const fl = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.6, 70), floatMat);
-  fl.position.set(atX, 0.05, 0);
-  g.add(fl);
-  for (let z = -30; z <= 30; z += 10) {
-    const pile = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 9, 16), pileMat);
-    pile.position.set(atX - 1.45, -2.2, z);
-    g.add(pile);
-  }
-  // cleats & a light post
+  const LEN = 72;
+  const floatMat = addCaustics(new THREE.MeshStandardMaterial({ color: '#A9A69E', roughness: 0.9 }), 0.25);
+  const deckMat = new THREE.MeshStandardMaterial({ color: '#C9C4B8', roughness: 0.85 });
+  const timber = new THREE.MeshStandardMaterial({ color: '#7A5E43', roughness: 0.9 });
+  const pileMat = addCaustics(new THREE.MeshStandardMaterial({ color: '#A3A49F', roughness: 0.85, metalness: 0 }), 0.35);
   const steel = new THREE.MeshStandardMaterial({ color: '#D7DCE0', metalness: 1, roughness: 0.25 });
-  for (let z = -30; z <= 30; z += 5) {
-    const c = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.36), steel);
-    c.position.set(atX + 1.05, 0.56, z);
-    g.add(c);
+  const white = new THREE.MeshStandardMaterial({ color: '#EEF0EE', roughness: 0.5 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.95, LEN), floatMat);
+  body.position.set(0, 0.04, 0);
+  g.add(body);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(2.36, 0.04, LEN), deckMat);
+  deck.position.set(0, 0.53, 0);
+  deck.receiveShadow = true;
+  g.add(deck);
+  for (const sx of [-1, 1]) {
+    const w = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.22, LEN), timber);
+    w.position.set(sx * 1.24, 0.42, 0);
+    g.add(w);
   }
-  return g;
-}
-
-/** Distant ridge of mountains to the west, like the Red Sea coast behind Hurghada. */
-export function makeMountains() {
-  const r = mulberry32(7);
-  const n = vnoise(r, 64);
-  const g = new THREE.Group();
-  const layers = [
-    { dist: 1500, height: 95, col: '#A98272', haze: '#D9C3B2', off: 0 },
-    { dist: 2100, height: 140, col: '#B99886', haze: '#E2CFBF', off: 37 },
-  ];
-  for (const L of layers) {
-    const geo = new THREE.PlaneGeometry(5200, 1, 360, 12);
-    const pos = geo.attributes.position as THREE.BufferAttribute;
-    const colors: number[] = [];
-    const cRock = new THREE.Color(L.col), cHaze = new THREE.Color(L.haze);
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const v = pos.getY(i) + 0.5; // 0 at base, 1 at ridge
-      const ridge = 0.25 + n(x * 0.0022 + L.off, 3) * 0.75 + n(x * 0.011 + L.off, 7) * 0.22 + n(x * 0.04, 9) * 0.06;
-      const h = ridge * L.height * Math.pow(v, 0.9) - 6;
-      pos.setY(i, h);
-      pos.setZ(i, (n(x * 0.01, v * 5 + L.off) - 0.5) * 40 * v);
-      const c = cHaze.clone().lerp(cRock, Math.min(1, v * 1.2) * 0.85);
-      colors.push(c.r, c.g, c.b);
+  // joints between pontoon sections
+  for (let z = -LEN / 2 + 12; z < LEN / 2; z += 12) {
+    const j = new THREE.Mesh(new THREE.BoxGeometry(2.38, 0.045, 0.06), new THREE.MeshStandardMaterial({ color: '#8C877C' }));
+    j.position.set(0, 0.54, z);
+    g.add(j);
+  }
+  for (let z = -30; z <= 30; z += 12) {
+    const pile = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 9.2, 16), pileMat);
+    pile.position.set(-1.55, -2.6, z);
+    g.add(pile);
+    const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.05, 6, 16), steel);
+    hoop.rotation.x = Math.PI / 2;
+    hoop.position.set(-1.55, 0.5, z);
+    g.add(hoop);
+  }
+  for (let z = -33; z <= 33; z += 3) {
+    for (const sx of [-1, 1]) {
+      const c = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.34), steel);
+      c.position.set(sx * 1.02, 0.59, z);
+      g.add(c);
     }
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geo.computeVertexNormals();
-    const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, fog: true }));
-    m.position.set(-L.dist, 0, 0);
-    m.rotation.y = Math.PI / 2;
-    g.add(m);
   }
+  // power and water pedestals with a lamp on top
+  for (let z = -30; z <= 30; z += 9) {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.85, 0.28), white);
+    p.position.set(0.7, 0.98, z);
+    g.add(p);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.06, 12), new THREE.MeshStandardMaterial({ color: '#1C2B44' }));
+    cap.position.set(0.7, 1.43, z);
+    g.add(cap);
+  }
+  mergeByMaterial(g, new Set());
+  g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+  g.position.x = atX;
   return g;
 }
 
-/** Small tender (RIB) the pilot works from. */
+/** The pilot's RIB: grey tubes, white hull, console, outboard, the tether reel and a small launch davit. */
 export function makeTender() {
   const g = new THREE.Group();
-  const tubeMat = new THREE.MeshStandardMaterial({ color: '#2F3A42', roughness: 0.6 });
-  const hullMat = new THREE.MeshPhysicalMaterial({ color: '#E9ECEA', roughness: 0.3, clearcoat: 0.6 });
-  const path = new THREE.CurvePath<THREE.Vector3>();
-  const pts = [
-    new THREE.Vector3(-1.9, 0, -0.85), new THREE.Vector3(1.0, 0, -0.85), new THREE.Vector3(2.1, 0, 0), new THREE.Vector3(1.0, 0, 0.85),
-    new THREE.Vector3(-1.9, 0, 0.85),
-  ];
-  const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.3);
-  path.add(curve);
-  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 0.24, 12, false), tubeMat);
-  tube.position.y = 0.32;
+  const tubeMat = new THREE.MeshStandardMaterial({ color: '#56616B', roughness: 0.7 });
+  const rubMat = new THREE.MeshStandardMaterial({ color: '#2B3036', roughness: 0.8 });
+  const hullMat = new THREE.MeshPhysicalMaterial({ color: '#EEF0EE', roughness: 0.3, clearcoat: 0.6 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: '#8E8A80', roughness: 0.9 });
+  const dark = new THREE.MeshStandardMaterial({ color: '#1F2428', roughness: 0.5 });
+  // tube: a U that closes to a rounded bow
+  const half = 0.82, len = 4.2;
+  const path = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(-len / 2, 0, -half), new THREE.Vector3(0.4, 0, -half), new THREE.Vector3(1.45, 0.08, -0.62), new THREE.Vector3(2.05, 0.2, 0),
+    new THREE.Vector3(1.45, 0.08, 0.62), new THREE.Vector3(0.4, 0, half), new THREE.Vector3(-len / 2, 0, half),
+  ], false, 'catmullrom', 0.4);
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(path, 64, 0.25, 14, false), tubeMat);
+  tube.position.y = 0.36;
   g.add(tube);
-  const base = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.35, 1.5), hullMat);
-  base.position.set(0, 0.05, 0);
-  g.add(base);
-  const consoleM = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.7, 0.6), hullMat);
-  consoleM.position.set(0.1, 0.6, 0);
-  g.add(consoleM);
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.26), new THREE.MeshBasicMaterial({ color: '#19C3C9' }));
-  screen.position.set(-0.21, 0.88, 0);
-  screen.rotation.y = -Math.PI / 2;
-  screen.rotation.x = -0.4;
+  const rub = new THREE.Mesh(new THREE.TubeGeometry(path, 64, 0.06, 6, false), rubMat);
+  rub.position.y = 0.24;
+  rub.scale.set(1.0, 1, 1.12);
+  g.add(rub);
+  for (const z of [-half, half]) {
+    const cone = new THREE.Mesh(new THREE.SphereGeometry(0.25, 14, 10), tubeMat);
+    cone.position.set(-len / 2, 0.36, z);
+    cone.scale.set(0.6, 1, 1);
+    g.add(cone);
+  }
+  // V hull under the tubes
+  const plan = new THREE.Shape();
+  plan.moveTo(-len / 2, -0.72); plan.lineTo(0.5, -0.72); plan.quadraticCurveTo(1.9, -0.5, 2.0, 0); plan.quadraticCurveTo(1.9, 0.5, 0.5, 0.72); plan.lineTo(-len / 2, 0.72); plan.closePath();
+  const hullGeo = new THREE.ExtrudeGeometry(plan, { depth: 0.36, bevelEnabled: true, bevelSize: 0.06, bevelThickness: 0.06, bevelSegments: 2 });
+  hullGeo.rotateX(-Math.PI / 2);
+  const p = hullGeo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) { if (p.getY(i) < 0.05) p.setY(i, p.getY(i) - 0.22 * (1 - Math.min(1, Math.abs(p.getZ(i)) / 0.75))); }
+  hullGeo.computeVertexNormals();
+  const hull = new THREE.Mesh(hullGeo, hullMat);
+  hull.position.y = -0.12;
+  g.add(hull);
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.04, 1.2), floorMat);
+  floor.position.set(-0.1, 0.27, 0);
+  g.add(floor);
+  // console with screen, small windscreen and wheel
+  const con = new THREE.Mesh(new RoundedBoxGeometry(0.62, 0.8, 0.62, 3, 0.07), hullMat);
+  con.position.set(0.15, 0.68, 0);
+  g.add(con);
+  const ws = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.26), new THREE.MeshPhysicalMaterial({ color: '#2B3A44', roughness: 0.05, transparent: true, opacity: 0.6, side: THREE.DoubleSide }));
+  ws.position.set(0.38, 1.2, 0); ws.rotation.y = Math.PI / 2; ws.rotation.x = 0; ws.rotateX(-0.45);
+  g.add(ws);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.22), new THREE.MeshBasicMaterial({ color: '#19C3C9' }));
+  screen.position.set(-0.17, 1.0, 0); screen.rotation.y = -Math.PI / 2; screen.rotateX(-0.5);
   g.add(screen);
-  const reel = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.3, 20), new THREE.MeshStandardMaterial({ color: '#19C3C9', roughness: 0.4 }));
-  reel.rotation.x = Math.PI / 2;
-  reel.position.set(-1.2, 0.5, 0);
-  g.add(reel);
-  const engine = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.8, 0.4), tubeMat);
-  engine.position.set(-1.95, 0.4, 0);
-  g.add(engine);
+  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.018, 6, 18), dark);
+  wheel.position.set(-0.2, 0.98, 0.15); wheel.rotation.y = Math.PI / 2; wheel.rotateX(-0.6);
+  g.add(wheel);
+  const seat = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.42, 0.7, 3, 0.06), dark);
+  seat.position.set(-0.55, 0.5, 0);
+  g.add(seat);
+  // outboard on the transom
+  const cowl = new THREE.Mesh(new RoundedBoxGeometry(0.42, 0.55, 0.36, 4, 0.1), new THREE.MeshPhysicalMaterial({ color: '#E9EBEA', roughness: 0.3, clearcoat: 0.6 }));
+  cowl.position.set(-len / 2 - 0.28, 0.72, 0);
+  g.add(cowl);
+  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.85, 0.12), dark);
+  leg.position.set(-len / 2 - 0.3, 0.12, 0);
+  g.add(leg);
+  // tether reel (cyan drum, orange tether) and a small davit to lower the robot
+  const reelFrame = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.08, 0.6), dark);
+  reelFrame.position.set(-1.25, 0.32, 0);
+  g.add(reelFrame);
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.36, 22), new THREE.MeshStandardMaterial({ color: '#19C3C9', roughness: 0.4 }));
+  drum.rotation.x = Math.PI / 2;
+  drum.position.set(-1.25, 0.66, 0);
+  g.add(drum);
+  const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.3, 22), new THREE.MeshStandardMaterial({ color: '#F08A24', roughness: 0.6 }));
+  wrap.rotation.x = Math.PI / 2;
+  wrap.position.copy(drum.position);
+  wrap.scale.set(1.08, 1.02, 1.08);
+  g.add(wrap);
+  const davit = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(-1.2, 0.3, -0.7), new THREE.Vector3(-1.2, 1.4, -0.75), new THREE.Vector3(-1.2, 1.55, -1.05), new THREE.Vector3(-1.2, 1.3, -1.25)]), 16, 0.04, 6), new THREE.MeshStandardMaterial({ color: '#D7DCE0', metalness: 1, roughness: 0.25 }));
+  g.add(davit);
+  mergeByMaterial(g, new Set());
+  g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
   return g;
 }
 

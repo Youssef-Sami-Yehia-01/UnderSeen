@@ -7,18 +7,19 @@ import {
 import { healthScore, SEVERITY_LABEL, mulberry32, type Yacht, type Finding } from '../../lib/yacht';
 import type { CleanStats } from '../../three/Experience';
 import * as sound from '../../lib/sound';
-import ScanViewer from './ScanViewer';
+import Photo from './Photo';
+import { yachtPhoto, FINDING_PHOTOS, MARINA_PHOTO, YARD_PHOTO, DIVER_PHOTO } from '../../lib/photos';
 import './app.css';
 
 export interface AppData {
   yacht: Yacht;
   stats: CleanStats;
-  hero: string;
-  shots: Record<string, { now: string; before: string }>;
+  hullMap: HullMap;
   plans: string[];
   levels: { growth: number[]; anode: number[]; months: string[]; events: string[] };
 }
 
+export interface HullMap { img: string; pins: { id: string; x: number; y: number }[] }
 type Tab = 'report' | 'time' | 'berth' | 'pass';
 const fmt = (s: number) => `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, '0')}s`;
 const growthWord = (g: number) => (g > 0.8 ? 'Heavy' : g > 0.45 ? 'Medium' : 'Light');
@@ -36,7 +37,8 @@ function Ring({ value }: { value: number }) {
 }
 
 export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart: () => void }) {
-  const { yacht: y, stats, hero, shots, plans, levels } = data;
+  const { yacht: y, stats, hullMap, plans, levels } = data;
+  const hero = yachtPhoto(y);
   const [tab, setTab] = useState<Tab>('report');
   const [open, setOpen] = useState<Finding | null>(null);
   const [booked, setBooked] = useState<Record<string, string>>({});
@@ -59,7 +61,9 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
       <div className="oa-scroll" ref={scroller}>
         {tab === 'report' && (
           <>
-            <header className="oa-hero" style={{ backgroundImage: hero ? `url(${hero})` : undefined }}>
+            <header className="oa-hero">
+              <Photo p={hero} className="oa-hero-bg" credit={false} />
+              <span className="oa-hero-credit">{hero.credit}</span>
               <div className="oa-hero-top">
                 <img className="oa-logo" src="/logo-white.png" alt="UNDERSEEN" />
                 <button className="oa-round" onClick={onRestart} aria-label="Try another name"><RotateCcw /></button>
@@ -86,10 +90,10 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
                 <div className="oa-tile"><Timer /><b>{fmt(stats.seconds)}</b><span>Robot on the hull</span></div>
               </div>
 
-              <h3 className="oa-sec">Findings <span>tap to see the scan</span></h3>
+              <h3 className="oa-sec">Findings <span>tap for details</span></h3>
               {y.findings.map((f) => (
                 <button key={f.id} className="oa-finding" onClick={() => setOpen(f)}>
-                  {shots[f.id] ? <img src={shots[f.id].now} alt="" /> : <div className="ph" />}
+                  <Photo p={FINDING_PHOTOS[f.kind]} className="oa-thumb" credit={false} />
                   <div>
                     <b>{f.title}</b>
                     <span className="w">{f.where}</span>
@@ -106,13 +110,24 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
                 <p>{y.anodePct < 40 ? 'Replace them within a month. Below 50% they stop protecting the propellers and shafts properly.' : `Plan a replacement within ${y.anodePct < 60 ? 2 : 4} months. We replace them at 50%.`}</p>
               </div>
 
-              <h3 className="oa-sec">Your hull in 3D</h3>
-              <ScanViewer yacht={y} />
+              <h3 className="oa-sec">Hull map <span>seen from below</span></h3>
+              <div className="oa-card" style={{ padding: 10 }}>
+                <div className="oa-hullmap">
+                  <img src={hullMap.img} alt={`Underside of MY ${y.name} with the findings marked`} />
+                  {hullMap.pins.map((p, i) => (
+                    <button key={p.id} className="pin" style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }} onClick={() => setOpen(y.findings.find((f) => f.id === p.id) ?? null)} aria-label={y.findings.find((f) => f.id === p.id)?.title}>{i + 1}</button>
+                  ))}
+                </div>
+                <div className="oa-pinlist">
+                  {y.findings.map((f, i) => <button key={f.id} onClick={() => setOpen(f)}><i>{i + 1}</i>{f.title}<span>{f.side === 'centre' ? '' : f.side}</span></button>)}
+                </div>
+              </div>
 
               <div className="oa-card oa-review" style={{ marginTop: 4 }}>
-                <div className="cal">DEC<br />{new Date().getFullYear()}</div>
+                <Photo p={DIVER_PHOTO} className="thumb" credit={false}><span className="cal-badge">DEC</span></Photo>
                 <p><b>Annual Hull Review</b><br />A short video of your boat's year below the waterline, and what to plan for next season.</p>
               </div>
+              <p className="oa-credits">Photos: {hero.credit}, {y.findings.map((f) => FINDING_PHOTOS[f.kind].credit).join(', ')}, {DIVER_PHOTO.credit}.</p>
             </div>
           </>
         )}
@@ -133,7 +148,7 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
         <FindingSheet
           y={y}
           f={open}
-          shot={shots[open.id]}
+          hullMap={hullMap}
           booked={booked[open.id]}
           onClose={() => setOpen(null)}
           onQuotes={() => notify(`${open.quotes.length} quotes received`, `For the ${open.title.toLowerCase()} on MY ${y.name}`)}
@@ -151,12 +166,14 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
   );
 }
 
-function FindingSheet({ y, f, shot, booked, onClose, onQuotes, onBook }: {
-  y: Yacht; f: Finding; shot?: { now: string; before: string }; booked?: string;
+function FindingSheet({ y, f, hullMap, booked, onClose, onQuotes, onBook }: {
+  y: Yacht; f: Finding; hullMap: HullMap; booked?: string;
   onClose: () => void; onQuotes: () => void; onBook: (p: string) => void;
 }) {
-  const [view, setView] = useState<'now' | 'before'>('now');
+  const [view, setView] = useState<'photo' | 'where'>('photo');
   const [stage, setStage] = useState<'idle' | 'sending' | 'quotes'>('idle');
+  const photo = FINDING_PHOTOS[f.kind];
+  const pin = hullMap.pins.find((p) => p.id === f.id);
   const request = () => {
     setStage('sending');
     setTimeout(() => { setStage('quotes'); onQuotes(); }, 2000);
@@ -167,17 +184,23 @@ function FindingSheet({ y, f, shot, booked, onClose, onQuotes, onBook }: {
       <div className="oa-sheet" role="dialog" aria-modal="true" aria-label={f.title}>
         <div className="oa-grab" />
         <div className="oa-sheet-head">
-          <div><h2>{f.title}</h2><p>New since scan {y.previousScanNo} · found by comparing the 3D scans</p></div>
+          <div><h2>{f.title}</h2><p>New since scan {y.previousScanNo} · found by comparing the two scans</p></div>
           <button className="oa-x" onClick={onClose} aria-label="Close"><X /></button>
         </div>
         <div className="oa-compare">
-          {shot ? <img src={view === 'now' ? shot.now : shot.before} alt={view === 'now' ? 'This scan' : 'Last scan'} /> : null}
-          <span className="stamp">{view === 'now' ? `SCAN ${y.scanNo} · TODAY` : `SCAN ${y.previousScanNo} · LAST MONTH`}</span>
-          {view === 'now' && <span className="ringmark" />}
+          {view === 'photo' ? (
+            <Photo p={photo} className="fill"><span className="stamp">SCAN {y.scanNo} · TODAY</span></Photo>
+          ) : (
+            <div className="oa-hullmap fill-map">
+              <img src={hullMap.img} alt={`Where the ${f.title.toLowerCase()} is on the hull`} />
+              {pin && <span className="pin big" style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%` }} />}
+              <span className="stamp">{f.where.toUpperCase()}</span>
+            </div>
+          )}
         </div>
-        <div className="oa-seg" role="group" aria-label="Compare scans">
-          <button aria-pressed={view === 'before'} onClick={() => setView('before')}>Scan {y.previousScanNo}</button>
-          <button aria-pressed={view === 'now'} onClick={() => setView('now')}>Scan {y.scanNo}</button>
+        <div className="oa-seg" role="group" aria-label="Photo or position">
+          <button aria-pressed={view === 'photo'} onClick={() => setView('photo')}>Photo</button>
+          <button aria-pressed={view === 'where'} onClick={() => setView('where')}>Where on the hull</button>
         </div>
         <div className="oa-facts">
           <div><small>Where</small><b>{f.where}</b></div>
@@ -194,9 +217,10 @@ function FindingSheet({ y, f, shot, booked, onClose, onQuotes, onBook }: {
         ) : stage === 'idle' ? (
           <button className="oa-btn p" onClick={request}><Wrench />Get repair quotes</button>
         ) : stage === 'sending' ? (
-          <div className="oa-spin"><i />Sending the 3D scan to repair partners…</div>
+          <div className="oa-spin"><i />Sending the scan to repair partners near Hurghada…</div>
         ) : (
           <>
+            <Photo p={YARD_PHOTO} className="oa-yard"><span className="oa-yard-label">Repair partners near Hurghada</span></Photo>
             <h4 style={{ marginTop: 0 }}>{f.quotes.length} quotes · example partners</h4>
             {f.quotes.map((q) => (
               <div className="oa-quote" key={q.partner}>
@@ -280,8 +304,9 @@ function Berth({ y, notify }: { y: Yacht; notify: (t: string, b: string) => void
   const now = new Date();
   return (
     <>
-      <div className="oa-title"><small>Pontoon {y.pontoon} · Hurghada</small><h1>Berth {y.berth}</h1><p>What holds your yacht in place, checked in every marina scan.</p></div>
+      <div className="oa-title"><small>Pontoon {y.pontoon} · Hurghada Marina</small><h1>Berth {y.berth}</h1><p>What holds your yacht in place, checked in every marina scan.</p></div>
       <div className="oa-body">
+        <Photo p={MARINA_PHOTO} className="oa-berth-photo" />
         <div className="oa-card" style={{ padding: 10 }}>
           <svg className="oa-map" viewBox="0 0 340 240" role="img" aria-label={`Map of pontoon ${y.pontoon}`}>
             {Array.from({ length: 6 }, (_, k) => <path key={k} d={`M0 ${150 + k * 15} Q 85 ${144 + k * 15} 170 ${150 + k * 15} T 340 ${150 + k * 15}`} fill="none" stroke="rgba(25,195,201,.12)" />)}
@@ -350,7 +375,7 @@ function Passport({ y, levels }: { y: Yacht; levels: AppData['levels'] }) {
         text: k === 0 ? `Cleaned · ${y.findings.length} new ${y.findings.length === 1 ? 'finding' : 'findings'}` : levels.events[idx] ?? 'Cleaned and scanned · no changes',
       });
     }
-    out.push({ date: first.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }), title: 'Scan 1', text: 'First dive · baseline 3D model of the hull' });
+    out.push({ date: first.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }), title: 'Scan 1', text: 'First dive · baseline scan of the hull' });
     return out;
   }, [y, levels]);
   const share = async () => {
@@ -362,7 +387,8 @@ function Passport({ y, levels }: { y: Yacht; levels: AppData['levels'] }) {
       <div className="oa-title"><small>Proof for buyers, brokers and insurers</small><h1>Hull Passport</h1></div>
       <div className="oa-body">
         <div className="oa-book">
-          <img src="/logo-white.png" alt="" style={{ width: 120 }} />
+          <Photo p={yachtPhoto(y)} className="oa-book-photo" credit={false} />
+          <img src="/logo-white.png" alt="" style={{ width: 120, position: 'relative' }} />
           <small>HULL PASSPORT</small>
           <h2>MY {y.name}</h2>
           <span>{y.lengthFt} ft · {y.scanNo} scans since {first.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</span>
@@ -377,7 +403,7 @@ function Passport({ y, levels }: { y: Yacht; levels: AppData['levels'] }) {
         </div>
         <div className="oa-card">
           <b style={{ fontSize: 16 }}>Selling the boat?</b>
-          <p style={{ margin: '4px 0 12px', fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.45 }}>Share the full 3D history with a buyer, broker or insurer.</p>
+          <p style={{ margin: '4px 0 12px', fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.45 }}>Share the full scan history with a buyer, broker or insurer.</p>
           {qr ? (
             <div className="oa-qr"><img src={qr} alt="QR code for this Hull Passport" /><p>Scan to open MY {y.name} in UNDERSEEN.<br />Demo: it opens this yacht in the simulator.</p></div>
           ) : (

@@ -7,6 +7,7 @@ import { makeYacht, healthScore, SEVERITY_LABEL, type Yacht } from '../lib/yacht
 import * as sound from '../lib/sound';
 import { saveStart, saveFinish } from '../lib/api';
 import OwnerApp, { type AppData } from './app/OwnerApp';
+import { REDSEA_PHOTO } from '../lib/photos';
 
 type UIPhase = Phase | 'ping' | 'app';
 
@@ -104,11 +105,15 @@ export default function Sim() {
     const e = exp.current;
     if (!e || !yacht) return;
     const levels = timelapseLevels(yacht);
+    const map = e.fouling.planImage(0, true, 900);
+    const W = map.canvas.width, H = map.canvas.height;
     setAppData({
       yacht,
       stats: finalStats.current ?? e.getStats(),
-      hero: e.heroImage,
-      shots: e.shots,
+      hullMap: {
+        img: map.canvas.toDataURL('image/jpeg', 0.88),
+        pins: yacht.findings.map((f) => { const [x, y2] = map.map(f.u, f.t); return { id: f.id, x: x / W, y: y2 / H }; }),
+      },
       plans: e.planImages(levels.growth, levels.growth.length - 1),
       levels,
     });
@@ -274,6 +279,7 @@ export default function Sim() {
         <div className="dim">
           <div className="device" style={{ ['--dev-scale' as string]: devScale }}>
             <div className="lock">
+              <img className="lock-bg" src={REDSEA_PHOTO.src} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
               <div className="time">{String(now.getHours()).padStart(2, '0')}:{String(now.getMinutes()).padStart(2, '0')}</div>
               <div className="date">{now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
               <button className="notif" onClick={openApp} aria-label="Open the UNDERSEEN report">

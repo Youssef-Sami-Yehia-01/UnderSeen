@@ -44,6 +44,21 @@ Only the name typed in, the generated yacht name and the dive results are stored
 - `src/ui/app/` is the owner app.
 - `api/session.ts` is the only server code: a Vercel function that talks to Upstash over its REST API.
 
+## Photos in the owner app
+
+The owner app uses real photos, loaded straight from the Pexels and Unsplash image servers (free to use under the [Pexels License](https://www.pexels.com/license/) and the [Unsplash License](https://unsplash.com/license)). Credits are shown on each photo. The list lives in `src/lib/photos.ts`; swap any URL there to change a photo.
+
+| Where | Photo |
+| --- | --- |
+| Report header (one per yacht) | Matteo Roman, Diego F. Parra, Saksham Vikram (Pexels); Alina Kacharho, Damian Barczak (Unsplash) |
+| Berth tab | Hurghada Marina by Bassel Zaki (Pexels) |
+| Lock screen | Red Sea coast by Mo Ismail (Pexels) |
+| Repair quotes | Repair yard in Hurghada (Pexels) |
+| Findings | Barney Goodman, Vadim Yefremov (Unsplash); Stuart Reece, Jan van der Wolf, Mark Henry Rood (Pexels) |
+| Annual review | NOAA (Unsplash) |
+
+The 3D is only in the dive itself. The owner app shows photos and a flat hull map.
+
 ## About the cleaning
 
 The two tools follow how hulls are actually cleaned:

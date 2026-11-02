@@ -416,8 +416,6 @@ export class Experience {
     this.limitToOpenWater(true);
     this.tweenCamera(new THREE.Vector3(L * 1.15 + 4, L * 0.28 + 2.2, B * 0.6 + L * 0.45), new THREE.Vector3(0, 1.3, 0), 2.4);
     this.ev.phase('intro');
-    // hero render once the yacht has been drawn
-    setTimeout(() => { this.heroImage = this.heroShot(); }, 400);
   }
 
   startDive() {
@@ -529,7 +527,6 @@ export class Experience {
         this.scan.sheet.visible = false;
         this.scan.mat.uniforms.uShowFind.value = 1;
         this.addFindingMarkers();
-        this.takeFindingShots();
         this.phase = 'result';
         this.controls.enabled = true;
         this.controls.autoRotate = true;

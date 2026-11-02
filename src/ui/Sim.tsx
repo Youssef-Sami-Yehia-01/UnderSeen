@@ -7,11 +7,60 @@ import { makeYacht, healthScore, SEVERITY_LABEL, type Yacht } from '../lib/yacht
 import * as sound from '../lib/sound';
 import { saveStart, saveFinish } from '../lib/api';
 import OwnerApp, { type AppData } from './app/OwnerApp';
-import { REDSEA_PHOTO, YACHT_PHOTOS } from '../lib/photos';
+import { REDSEA_PHOTO, YACHT_PHOTOS, MARINA_PHOTO, type Photo } from '../lib/photos';
 import { HullShape } from '../three/hull';
 
 type UIPhase = Phase | 'loading' | 'ping' | 'app';
-const LANDING_PHOTO = YACHT_PHOTOS[0];
+// first-page slideshow: full-screen photos of yachts, Hurghada Marina and the Red Sea coast
+const big = (p: Photo): Photo => ({ ...p, src: p.src.replace(/w=\d+/, 'w=1920') });
+const SLIDES: (Photo & { caption: string })[] = [
+  { ...big(YACHT_PHOTOS[0]), caption: 'Off Hurghada' },
+  { ...big(MARINA_PHOTO), caption: 'Hurghada Marina' },
+  { ...big(YACHT_PHOTOS[1]), caption: 'Red Sea' },
+  { ...big(REDSEA_PHOTO), caption: 'The Red Sea coast' },
+  { ...big(YACHT_PHOTOS[4]), caption: 'Moored for the night' },
+];
+
+function Slideshow() {
+  const [i, setI] = useState(0);
+  const [failed, setFailed] = useState<Set<number>>(new Set());
+  const [paused, setPaused] = useState(false);
+  const ok = SLIDES.map((_, k) => k).filter((k) => !failed.has(k));
+  useEffect(() => {
+    if (paused || ok.length < 2) return;
+    const t = window.setTimeout(() => {
+      const at = ok.indexOf(i);
+      setI(ok[(at + 1) % ok.length]);
+    }, 5500);
+    return () => clearTimeout(t);
+  }, [i, paused, ok.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cur = SLIDES[i];
+  return (
+    <div className="slides" onPointerEnter={() => setPaused(true)} onPointerLeave={() => setPaused(false)}>
+      {SLIDES.map((sl, k) => (
+        <img
+          key={sl.src}
+          className={`slide${k === i ? ' on' : ''}`}
+          src={sl.src}
+          alt={k === i ? sl.alt : ''}
+          aria-hidden={k !== i}
+          loading={k < 2 ? 'eager' : 'lazy'}
+          style={{ objectPosition: sl.pos ?? 'center' }}
+          onError={() => { setFailed((f) => new Set(f).add(k)); if (k === i) setI((k + 1) % SLIDES.length); }}
+        />
+      ))}
+      <div className="landing-shade" />
+      {ok.length > 1 && (
+        <div className="slide-dots" role="tablist" aria-label="Photos">
+          {ok.map((k) => (
+            <button key={k} role="tab" aria-selected={k === i} aria-label={SLIDES[k].caption} className={k === i ? 'on' : ''} onClick={() => setI(k)}><i /></button>
+          ))}
+        </div>
+      )}
+      {!failed.has(i) && <span className="landing-credit"><span className="cap">{cur.caption} · </span>Photo: {cur.credit}</span>}
+    </div>
+  );
+}
 
 const fmtTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const GROWTH_COLOR = { light: '#7FD36E', medium: '#E9A23B', heavy: '#FF6B4A' } as const;
@@ -182,11 +231,8 @@ export default function Sim() {
       {/* landing: photo first, the 3D starts after the name */}
       {(phase === 'landing' || phase === 'loading') && (
         <div className="landing">
-          <header className="landing-top"><img src="/logo-h-navy.png" alt="UNDERSEEN" /></header>
-          <figure className="landing-figure">
-            <img className="landing-photo" src={LANDING_PHOTO.src} alt={LANDING_PHOTO.alt} onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
-            <figcaption className="landing-credit">Photo: {LANDING_PHOTO.credit}</figcaption>
-          </figure>
+          <Slideshow />
+          <header className="landing-top"><img src="/logo-h-white.png" alt="UNDERSEEN" /></header>
           <form className="landing-copy" onSubmit={submitName}>
             <div className="landing-eyebrow">Yachting &amp; marine · Hurghada, Red Sea</div>
             <h1 className="landing-title">Dive under your yacht.</h1>

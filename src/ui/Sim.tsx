@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Volume2, VolumeX, ArrowRight, Hand, Sparkles, Paintbrush, Waves, ScanLine, Bot, Eye, Crosshair, Plus, Minus, Info, AlertTriangle, RotateCcw,
+  Volume2, VolumeX, ArrowRight, Hand, Sparkles, Paintbrush, Waves, Bot, Eye, Crosshair, Plus, Minus, Info, AlertTriangle, RotateCcw,
 } from 'lucide-react';
 import { Experience, type Phase, type CleanStats, type Label, type ToolMode } from '../three/Experience';
 import { makeYacht, healthScore, SEVERITY_LABEL, type Yacht } from '../lib/yacht';
@@ -139,6 +139,7 @@ export default function Sim() {
     finalStats.current = exp.current.getStats();
     exp.current.startScan();
   };
+  const finishing = useRef(false);
 
   const sendReport = () => {
     if (!exp.current || !yacht) return;
@@ -187,18 +188,26 @@ export default function Sim() {
   const toggleMute = () => { const m = !muted; setMutedState(m); sound.setMuted(m); };
 
   const hardLeft = !!stats && stats.barnaclesLeft > Math.max(6, stats.barnaclesTotal * 0.12);
-  const canScan = !!stats && stats.coverage >= 0.8 && !hardLeft;
+  // the scan builds up while cleaning, so when the hull is done the results open by themselves
+  const cleanDone = !!stats && stats.coverage >= 0.9 && !hardLeft;
+  useEffect(() => {
+    if (phase !== 'clean') { finishing.current = false; return; }
+    if (!cleanDone || finishing.current) return;
+    finishing.current = true;
+    const t = window.setTimeout(() => { setAuto(false); startScan(); }, 1600);
+    return () => { clearTimeout(t); finishing.current = false; };
+  }, [phase, cleanDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tip = useMemo(() => {
     if (!stats) return { warn: false, el: <>Press and drag on the hull to steer the robot. Hold still over barnacles to let the jet work.</> };
     if (stats.brushOnBarnacles) return { warn: true, el: <><b>The brush can't lift barnacles.</b> They are cemented to the hull. Switch to the cavitation jet.</> };
     if (stats.activeTool === 'jet') return { warn: false, el: <><b>Cavitation jet on.</b> Bubbles collapse against the shell and crack the cement without stripping the paint.</> };
     if (stats.activeTool === 'brush') return { warn: false, el: <><b>Brushing.</b> Soft nylon bristles lift the slime and weed. Suction pulls it into the filter, so nothing is left in the marina.</> };
-    if (canScan) return { warn: false, el: <><b>Hull clean and scanned.</b> Open the 3D scan to compare it with last month.</> };
+    if (cleanDone) return { warn: false, el: <><b>Hull clean and scanned.</b> Opening your 3D scan…</> };
     if (stats.coverage >= 0.8 && hardLeft) return { warn: true, el: <><b>Hard growth is still on the hull.</b> Barnacles need the jet. Turn on Autopilot to finish them.</> };
     if (stats.coverage > 0.35 && !auto) return { warn: false, el: <>Getting tired? Turn on <b>Autopilot</b> and the robot will finish the hull in rows.</> };
     return { warn: false, el: <>Press and drag on the hull to steer the robot. Its cameras <b>3D-scan the hull as it cleans</b>; the Auto tool switches to the jet for barnacles.</> };
-  }, [stats, canScan, auto, hardLeft]);
+  }, [stats, cleanDone, auto, hardLeft]);
 
   const y = yacht;
   const st = stats;
@@ -286,9 +295,8 @@ export default function Sim() {
               <div className="meter"><small>Cleaned and scanned <b>{st ? `${Math.round(st.areaM2)} of ${Math.round(st.totalM2)} m²` : '–'}</b></small><div className="bar"><i style={{ width: `${Math.round((st?.coverage ?? 0) * 100)}%` }} /></div></div>
             </div>
             <div className={`tip${tip.warn ? ' warn' : ''}`}>{tip.warn ? <AlertTriangle /> : <Info />}<span>{tip.el}</span></div>
-            <div className="actions">
+            <div className="actions one">
               <button className="btn btn-ghost btn-toggle" aria-pressed={auto} onClick={() => { const v = !auto; setAuto(v); exp.current?.setAutopilot(v); if (v) setCam('follow'); }}><Bot />{auto ? 'Autopilot on' : 'Autopilot'}</button>
-              <button className="btn btn-primary" disabled={!canScan} onClick={startScan}><ScanLine />See the 3D scan</button>
             </div>
           </div>
         </>
@@ -364,7 +372,7 @@ function timelapseLevels(y: Yacht): Levels {
     const summer = ['Jun', 'Jul', 'Aug', 'Sep'].includes(m) ? 0.25 : 0;
     return Math.min(0.75, 0.18 + summer + ((y.seed >> i) & 3) * 0.05);
   });
-  const replacedAt = 2 + (y.seed % 3);
+  const replacedAt = 2 + ((y.seed >>> 0) % 3);
   const anode = months.map((_, i) => {
     if (i < replacedAt) return Math.round(Math.max(y.anodePct + 30, 70) - i * 6);
     const span = 9 - replacedAt;

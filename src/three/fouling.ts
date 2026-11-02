@@ -398,14 +398,19 @@ export class FoulingSystem {
     const pad = width * 0.06;
     const len = width - pad * 2;
     const maxHalf = (H / 2) * 0.86;
-    // draw column by column: u along x (stern left, bow right), t across scaled to hull half-width
+    // draw column by column: u along x (stern left, bow right), t across scaled to hull half-width.
+    // Seen from below with the bow to the right, starboard (t > 0) is at the top: flip the skin vertically.
     const cols = 240;
+    x.save();
+    x.translate(0, H);
+    x.scale(1, -1);
     for (let i = 0; i < cols; i++) {
       const u = (i + 0.5) / cols;
       const half = s.hb(u) * maxHalf;
       if (half < 0.5) continue;
       x.drawImage(src, (i / cols) * SKIN_W, 0, SKIN_W / cols + 1, SKIN_H, pad + (i / cols) * len, H / 2 - half, len / cols + 1, half * 2);
     }
+    x.restore();
     // outline + keel
     x.strokeStyle = 'rgba(220,235,240,.6)'; x.lineWidth = 1.5;
     x.beginPath();
@@ -415,7 +420,9 @@ export class FoulingSystem {
     x.strokeStyle = 'rgba(220,235,240,.25)'; x.beginPath(); x.moveTo(pad, H / 2); x.lineTo(pad + len, H / 2); x.stroke();
     x.fillStyle = 'rgba(220,235,240,.65)'; x.font = '600 11px system-ui, sans-serif';
     x.fillText('STERN', 6, 14); x.textAlign = 'right'; x.fillText('BOW', width - 6, 14);
-    return { canvas: c, map: (u: number, t: number) => [pad + u * len, H / 2 + t * s.hb(u) * maxHalf] as [number, number] };
+    x.textAlign = 'center';
+    x.fillText('STARBOARD', width / 2, 14); x.fillText('PORT', width / 2, H - 6);
+    return { canvas: c, map: (u: number, t: number) => [pad + u * len, H / 2 - t * s.hb(u) * maxHalf] as [number, number] };
   }
 
   dispose() {

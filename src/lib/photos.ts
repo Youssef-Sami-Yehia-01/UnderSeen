@@ -16,7 +16,7 @@ export const YACHT_PHOTOS: Photo[] = [
   { src: unsplash('photo-1622219969983-45589eae5637'), credit: 'Damian Barczak / Unsplash', alt: 'A yacht moored at a dock at sunset' },
 ];
 
-export const yachtPhoto = (y: Yacht) => YACHT_PHOTOS[y.seed % YACHT_PHOTOS.length];
+export const yachtPhoto = (y: Yacht) => YACHT_PHOTOS[(y.seed >>> 0) % YACHT_PHOTOS.length]; // seeds can be negative
 
 export const MARINA_PHOTO: Photo = { src: pexels(18614692), credit: 'Bassel Zaki / Pexels', alt: 'Yachts moored in Hurghada Marina at sunset' };
 export const REDSEA_PHOTO: Photo = { src: pexels(22643843, 900), credit: 'Mo Ismail / Pexels', alt: 'The Red Sea coast near Hurghada at sunset' };

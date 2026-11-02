@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import QRCode from 'qrcode';
 import {
-  Activity, History, Anchor, BookOpen, ChevronRight, X, RotateCcw, Ruler, Timer, Trash2, CheckCircle2, Clock, Wrench,
-  Waves, Link2, LifeBuoy, AlertTriangle, CloudLightning, Share2, Gauge, CalendarDays, MapPin, Sparkles,
+  Activity, History, Anchor, ClipboardList, ChevronRight, X, RotateCcw, Ruler, Timer, Trash2, CheckCircle2, Clock, Wrench,
+  Waves, Link2, LifeBuoy, AlertTriangle, Gauge, CalendarDays, MapPin, Sparkles,
 } from 'lucide-react';
 import '@fontsource/source-serif-4/500.css';
 import '@fontsource/source-serif-4/600.css';
@@ -22,8 +21,8 @@ export interface AppData {
   levels: { growth: number[]; anode: number[]; months: string[]; events: string[] };
 }
 
-type Tab = 'report' | 'time' | 'berth' | 'pass';
-const TITLES: Record<Tab, string> = { report: 'Report', time: 'Time-lapse', berth: 'Berth', pass: 'Hull Passport' };
+type Tab = 'report' | 'time' | 'berth' | 'history';
+const TITLES: Record<Tab, string> = { report: 'Report', time: 'Time-lapse', berth: 'Berth', history: 'History' };
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const growthWord = (g: number) => (g > 0.8 ? 'Heavy' : g > 0.45 ? 'Medium' : 'Light');
 const today = () => new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -105,14 +104,14 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
                 <div className="health-text">
                   <small>Hull condition</small>
                   <h3>{score >= 80 ? 'Good' : score >= 60 ? 'Needs attention' : 'Act soon'}</h3>
-                  <p>{issues} new {issues === 1 ? 'finding' : 'findings'} since last month. The hull is clean and the scan is saved to your passport.</p>
+                  <p>{issues} new {issues === 1 ? 'finding' : 'findings'} since last month. The hull is clean and the scan is saved to your history.</p>
                 </div>
               </section>
 
               <div className="tiles">
                 <div className="tile"><span className="tile-k"><Ruler style={{ color: '#0B7F84' }} />Cleaned</span><b>{Math.round(stats.areaM2)}<small> of {Math.round(stats.totalM2)} m²</small></b></div>
                 <div className="tile"><span className="tile-k"><CalendarDays style={{ color: '#C77A2E' }} />Next dive</span><b>28<small> days</small></b></div>
-                <div className="tile"><span className="tile-k"><Trash2 style={{ color: '#5B7F3A' }} />In the filter</span><b>{stats.debrisKg.toFixed(1)}<small> kg est.</small></b></div>
+                <div className="tile"><span className="tile-k"><Trash2 style={{ color: '#5B7F3A' }} />Kept out of the marina</span><b>{stats.debrisKg.toFixed(1)}<small> kg est.</small></b></div>
                 <div className="tile"><span className="tile-k"><Timer style={{ color: '#5A5FD6' }} />On the hull</span><b>{fmt(stats.seconds)}<small> min</small></b></div>
               </div>
 
@@ -130,9 +129,10 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
 
               <h2 className="sec">Anodes</h2>
               <section className="card anode">
-                <div className="anode-top"><span><Gauge />Zinc anodes</span><b>{y.anodePct}%</b></div>
-                <div className="track"><i style={{ width: `${y.anodePct}%`, background: y.anodePct < 40 ? '#E5533A' : '#D08A12' }} /><em style={{ left: '50%' }} /></div>
-                <p>{y.anodePct < 40 ? 'Replace within a month. Below 50% they stop protecting the propellers and shafts properly.' : `Plan a replacement within ${y.anodePct < 60 ? 2 : 4} months. We replace them at 50%.`}</p>
+                <div className="anode-top"><span><Gauge />Zinc anodes</span><b>{y.anodePct}%<small> left</small></b></div>
+                <div className="track"><i style={{ width: `${y.anodePct}%`, background: y.anodePct < 50 ? '#E5533A' : '#D08A12' }} /><em style={{ left: '50%' }} /></div>
+                <p>Small zinc blocks on the shafts and the transom. In salt water they corrode on purpose, so your propellers and shafts don't. The scan measures how much metal is left: <b>{y.anodePct}%</b>.</p>
+                <p>{y.anodePct < 50 ? 'Less than half is left: replace them now, before they stop protecting the propellers and shafts.' : `Replace them when about half is gone. At this rate that is in about ${y.anodePct < 60 ? 2 : 4} months.`}</p>
               </section>
 
               <h2 className="sec">Hull map <span>seen from below</span></h2>
@@ -165,15 +165,15 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
         )}
 
         {tab === 'time' && <TimeLapse y={y} plans={plans} levels={levels} />}
-        {tab === 'berth' && <Berth y={y} notify={notify} />}
-        {tab === 'pass' && <Passport y={y} levels={levels} />}
+        {tab === 'berth' && <Berth y={y} />}
+        {tab === 'history' && <HistoryTab y={y} levels={levels} booked={booked} />}
       </div>
 
       <nav className="tabbar" role="tablist">
         <button role="tab" aria-selected={tab === 'report'} onClick={() => go('report')}><Activity />Report</button>
         <button role="tab" aria-selected={tab === 'time'} onClick={() => go('time')}><History />Time-lapse</button>
         <button role="tab" aria-selected={tab === 'berth'} onClick={() => go('berth')}><Anchor />Berth</button>
-        <button role="tab" aria-selected={tab === 'pass'} onClick={() => go('pass')}><BookOpen />Passport</button>
+        <button role="tab" aria-selected={tab === 'history'} onClick={() => go('history')}><ClipboardList />History</button>
       </nav>
 
       {open && (
@@ -233,8 +233,11 @@ function FindingSheet({ y, f, hullMap, booked, onClose, onQuotes, onBook }: {
             <Photo p={photo} className="fill" />
           ) : (
             <div className="hullmap fill center">
-              <img src={hullMap.img} alt={`Where the ${f.title.toLowerCase()} is on the hull`} />
-              {pin && <span className="pin ring-pin" style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%` }} />}
+              {/* pins are placed in the image's own box, not the taller photo frame around it */}
+              <div className="hm-inner">
+                <img src={hullMap.img} alt={`Where the ${f.title.toLowerCase()} is on the hull`} />
+                {pin && <span className="pin ring-pin" style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%` }} />}
+              </div>
             </div>
           )}
         </div>
@@ -298,7 +301,7 @@ function TimeLapse({ y, plans, levels }: { y: Yacht; plans: string[]; levels: Ap
         </section>
         <div className="tiles three">
           <div className="tile"><span className="tile-k">Growth found</span><b className="sm">{growthWord(levels.growth[i])}</b></div>
-          <div className="tile"><span className="tile-k">Anodes</span><b className="sm">{levels.anode[i]}%</b></div>
+          <div className="tile"><span className="tile-k">Anodes left</span><b className="sm">{levels.anode[i]}%</b></div>
           <div className="tile"><span className="tile-k">Changes</span><b className="sm">{i === n - 1 ? `${y.findings.length} new` : 'None'}</b></div>
         </div>
         <div className="event"><Sparkles />{levels.events[i]}</div>
@@ -316,11 +319,11 @@ function TimeLapse({ y, plans, levels }: { y: Yacht; plans: string[]; levels: Ap
           </svg>
         </section>
 
-        <h2 className="sec">Anode level</h2>
+        <h2 className="sec">Anode metal left</h2>
         <section className="card">
           <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Anode level at each scan">
             <line x1="0" x2={W} y1={yv(50)} y2={yv(50)} stroke="#F0C2B6" strokeDasharray="3 4" />
-            <text x={W - 2} y={yv(50) - 4} textAnchor="end">replace at 50%</text>
+            <text x={W - 2} y={yv(50) - 4} textAnchor="end">replace when half is gone</text>
             <line x1="0" x2={W} y1={B} y2={B} stroke="#E2DFD8" />
             <path d={`${aPath} L ${xs(n - 1)} ${B} L ${xs(0)} ${B} Z`} fill="rgba(208,138,18,.10)" />
             <path d={aPath} fill="none" stroke="#D08A12" strokeWidth="2.4" strokeLinejoin="round" />
@@ -333,20 +336,11 @@ function TimeLapse({ y, plans, levels }: { y: Yacht; plans: string[]; levels: Ap
   );
 }
 
-function Berth({ y, notify }: { y: Yacht; notify: (t: string, b: string) => void }) {
+function Berth({ y }: { y: Yacht }) {
   const r = useMemo(() => mulberry32(y.seed ^ 0xbe), [y.seed]);
   const facts = useMemo(() => ({ depth: (3 + r() * 1.2).toFixed(1), pile: r() < 0.6, pileNo: Math.max(1, Number(y.berth.split('-')[1]) - 2) }), [r, y.berth]);
-  const [storm, setStorm] = useState<'idle' | 'running' | 'done'>('idle');
-  const [waveT, setWaveT] = useState(0);
-  useEffect(() => {
-    if (storm !== 'running') return;
-    const id = setInterval(() => setWaveT((t) => t + 1), 110);
-    const done = setTimeout(() => { setStorm('done'); notify('Storm check done', `Your boat and berth ${y.berth}: no changes.`); }, 2800);
-    return () => { clearInterval(id); clearTimeout(done); };
-  }, [storm, notify, y.berth]);
   const my = Number(y.berth.split('-')[1]);
   const berths = Array.from({ length: 7 }, (_, k) => my - 3 + k).filter((b) => b > 0);
-  const now = new Date();
   return (
     <>
       <LargeTitle eyebrow={`Pontoon ${y.pontoon} · Hurghada Marina`} title={`Berth ${y.berth}`} sub="What holds your yacht in place, checked in every marina scan." />
@@ -379,10 +373,6 @@ function Berth({ y, notify }: { y: Yacht; notify: (t: string, b: string) => void
             })}
             {facts.pile && <><circle cx={34 + 44} cy="38" r="8" fill="#fff" stroke="#E5533A" strokeWidth="2" /><circle cx={34 + 44} cy="38" r="2.8" fill="#E5533A" /></>}
             <text x="328" y="228" textAnchor="end" fontSize="10" fill="#8E8A82">depth {facts.depth} m</text>
-            {storm === 'running' && Array.from({ length: 7 }, (_, k) => {
-              const yy = 56 + k * 24 + Math.sin(waveT / 2 + k) * 4;
-              return <path key={`w${k}`} d={`M0 ${yy} Q 42 ${yy - 10} 85 ${yy} T 170 ${yy} T 255 ${yy} T 340 ${yy}`} fill="none" stroke="rgba(11,127,132,.35)" strokeWidth="1.5" />;
-            })}
           </svg>
         </section>
 
@@ -393,84 +383,75 @@ function Berth({ y, notify }: { y: Yacht; notify: (t: string, b: string) => void
           {facts.pile && <div className="row"><span className="row-icon" style={{ background: '#FDECE8', color: '#D2472F' }}><AlertTriangle /></span><span className="row-main"><b>Nearby: pile {y.pontoon}-{String(facts.pileNo).padStart(2, '0')}</b><span>Corrosion flagged for engineer review. The marina has been told.</span></span></div>}
         </div>
 
-        <h2 className="sec">Storm Check</h2>
-        <section className="card">
-          <p className="card-p">After every storm the robot checks your boat and berth before you ask.</p>
-          {storm === 'idle' && <button className="btn-fill" onClick={() => setStorm('running')}><CloudLightning />Simulate a storm</button>}
-          {storm === 'running' && <div className="spin"><i />Storm passed. Checking chain, block and depth at {y.berth}…</div>}
-          {storm === 'done' && (
-            <>
-              <div className="msg"><span className="banner-ico"><img src="/favicon.svg" alt="" /></span><div><b>Storm check done.</b> Your boat and berth {y.berth}: <span className="good">no changes.</span><small>Today {String(now.getHours()).padStart(2, '0')}:{String(now.getMinutes()).padStart(2, '0')} · chain, block and depth re-scanned</small></div></div>
-              <button className="btn-plain" onClick={() => setStorm('running')}>Run it again</button>
-            </>
-          )}
-        </section>
       </div>
     </>
   );
 }
 
-function Passport({ y, levels }: { y: Yacht; levels: AppData['levels'] }) {
-  const [qr, setQr] = useState('');
+function HistoryTab({ y, levels, booked }: { y: Yacht; levels: AppData['levels']; booked: Record<string, string> }) {
   const first = new Date();
   first.setMonth(first.getMonth() - (y.scanNo - 1));
+  const n = levels.months.length;
   const items = useMemo(() => {
-    const out: { date: string; title: string; text: string; key?: boolean }[] = [];
-    const n = levels.months.length;
-    for (let k = 0; k < 6; k++) {
+    const out: { date: string; title: string; text: string; tags: string[]; key?: boolean }[] = [];
+    for (let k = 0; k < Math.min(n, y.scanNo - 1); k++) {
       const d = new Date(); d.setMonth(d.getMonth() - k);
       const idx = n - 1 - k;
+      const ev = levels.events[idx] ?? '';
       out.push({
-        date: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
-        title: `Scan ${y.scanNo - k}`,
-        text: k === 0 ? `Cleaned · ${y.findings.length} new ${y.findings.length === 1 ? 'finding' : 'findings'}` : levels.events[idx] ?? 'Cleaned and scanned · no changes',
-        key: k === 0 || (levels.events[idx] ?? '').startsWith('Anodes'),
+        date: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: k === 0 || d.getMonth() === 11 ? 'numeric' : undefined }),
+        title: k === 0 ? `Dive ${y.scanNo} · today` : `Dive ${y.scanNo - k}`,
+        text: k === 0 ? `Cleaned and scanned · ${y.findings.length} new ${y.findings.length === 1 ? 'finding' : 'findings'}` : ev || 'Cleaned and scanned · no changes',
+        tags: [`Growth: ${growthWord(levels.growth[idx] ?? 0).toLowerCase()}`, `Anodes ${levels.anode[idx] ?? y.anodePct}% left`],
+        key: k === 0 || ev.startsWith('Anodes'),
       });
     }
-    out.push({ date: first.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }), title: 'Scan 1', text: 'First dive · baseline scan of the hull', key: true });
     return out;
-  }, [y, levels]);
-  const share = async () => {
-    const url = `${location.origin}/?name=${encodeURIComponent(y.owner)}`;
-    setQr(await QRCode.toDataURL(url, { margin: 1, width: 380, color: { dark: '#1C1C1E', light: '#FFFFFF' } }));
-  };
+  }, [y, levels, n]);
+  const repairs = Object.entries(booked);
   return (
     <>
-      <LargeTitle eyebrow="Proof for buyers, brokers and insurers" title="Hull Passport" />
+      <LargeTitle eyebrow={`MY ${y.name}`} title="History" sub={`Every dive, scan and repair on your hull since ${first.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}.`} />
       <div className="oa-body">
-        <div className="book">
-          <Photo p={yachtPhoto(y)} className="book-photo" credit={false} />
-          <div className="book-in">
-            <img src="/logo-white.png" alt="UNDERSEEN" />
-            <div>
-              <small>HULL PASSPORT</small>
-              <h2>MY {y.name}</h2>
-              <span>{y.lengthFt} ft {y.style} · {y.scanNo} scans since {first.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</span>
-            </div>
-          </div>
+        <div className="tiles three">
+          <div className="tile"><span className="tile-k">Dives</span><b className="sm">{y.scanNo}</b></div>
+          <div className="tile"><span className="tile-k">Repairs booked</span><b className="sm">{repairs.length}</b></div>
+          <div className="tile"><span className="tile-k">Open findings</span><b className="sm">{y.findings.length - repairs.length}</b></div>
         </div>
 
-        <h2 className="sec">Scan history</h2>
+        {repairs.length > 0 && (
+          <>
+            <h2 className="sec">Repairs</h2>
+            <div className="list">
+              {repairs.map(([id, partner]) => {
+                const f = y.findings.find((x) => x.id === id);
+                return (
+                  <div className="row" key={id}>
+                    <span className="row-icon" style={{ background: '#E4F3EE', color: '#1F7A55' }}><Wrench /></span>
+                    <span className="row-main"><b>{f?.title}</b><span>Booked with {partner} · checked on the next dive</span></span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        <h2 className="sec">Dives and scans</h2>
         <section className="card">
           <div className="timeline">
             {items.map((it) => (
               <div className={`tl${it.key ? ' key' : ''}`} key={it.title}>
                 <time>{it.date}</time>
                 <span className="tl-dot"><i /></span>
-                <div><b>{it.title}</b><span>{it.text}</span></div>
+                <div><b>{it.title}</b><span>{it.text}</span><em className="tl-tags">{it.tags.join(' · ')}</em></div>
               </div>
             ))}
+            <div className="tl key">
+              <time>{first.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</time>
+              <span className="tl-dot"><i /></span>
+              <div><b>Dive 1</b><span>First dive · baseline 3D scan of the hull</span></div>
+            </div>
           </div>
-        </section>
-
-        <h2 className="sec">Selling the boat?</h2>
-        <section className="card">
-          <p className="card-p">Share the full scan history with a buyer, broker or insurer.</p>
-          {qr ? (
-            <div className="qr"><img src={qr} alt="QR code for this Hull Passport" /><p>Scan to open MY {y.name} in UNDERSEEN.<br />Demo: it opens this yacht in the simulator.</p></div>
-          ) : (
-            <button className="btn-fill" onClick={share}><Share2 />Share with a buyer</button>
-          )}
         </section>
       </div>
     </>

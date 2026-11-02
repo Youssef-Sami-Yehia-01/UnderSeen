@@ -50,13 +50,6 @@ function Slideshow() {
         />
       ))}
       <div className="landing-shade" />
-      {ok.length > 1 && (
-        <div className="slide-dots" role="tablist" aria-label="Photos">
-          {ok.map((k) => (
-            <button key={k} role="tab" aria-selected={k === i} aria-label={SLIDES[k].caption} className={k === i ? 'on' : ''} onClick={() => setI(k)}><i /></button>
-          ))}
-        </div>
-      )}
       {!failed.has(i) && <span className="landing-credit"><span className="cap">{cur.caption} · </span>Photo: {cur.credit}</span>}
     </div>
   );

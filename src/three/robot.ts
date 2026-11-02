@@ -1,24 +1,28 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { addCaustics, causticUniforms } from './environment';
+import { addCaustics } from './environment';
 import { HullShape } from './hull';
 
-function logoTexture() {
+/** Wordmark for the top of the float (text only, no symbol). */
+function wordmarkTexture() {
   const c = document.createElement('canvas');
-  c.width = 512; c.height = 256;
+  c.width = 1024; c.height = 128;
   const x = c.getContext('2d')!;
-  x.clearRect(0, 0, 512, 256);
-  x.translate(56, 40);
-  x.lineCap = 'round';
-  x.strokeStyle = '#0A2233'; x.lineWidth = 18;
-  x.beginPath(); x.moveTo(14 * 2, 40 * 2); x.lineTo(186 * 2, 40 * 2); x.stroke();
-  x.beginPath(); x.arc(200, 80, 124, 0, Math.PI); x.stroke();
-  x.strokeStyle = '#19C3C9'; x.lineWidth = 14;
-  x.beginPath(); x.arc(200, 80, 80, 0, Math.PI); x.stroke();
-  x.beginPath(); x.arc(200, 80, 38, 0, Math.PI); x.stroke();
-  x.fillStyle = '#FF6B4A'; x.beginPath(); x.arc(252, 140, 16, 0, Math.PI * 2); x.fill();
+  x.clearRect(0, 0, c.width, c.height);
+  x.fillStyle = '#0A2233';
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.font = '700 78px "Helvetica Neue", Arial, sans-serif';
+  // letter-spacing by hand
+  const word = 'UNDERSEEN';
+  const spacing = 22;
+  const widths = [...word].map((ch) => x.measureText(ch).width);
+  const total = widths.reduce((a, b) => a + b, 0) + spacing * (word.length - 1);
+  let px = 512 - total / 2;
+  x.textAlign = 'left';
+  [...word].forEach((ch, i) => { x.fillText(ch, px, 66); px += widths[i] + spacing; });
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
   return t;
 }
 
@@ -26,18 +30,23 @@ function bristleTexture() {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 256;
   const x = c.getContext('2d')!;
-  x.fillStyle = '#1C2730'; x.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 900; i++) {
-    const a = Math.random() * Math.PI * 2, r = 20 + Math.random() * 105;
-    x.fillStyle = Math.random() < 0.7 ? '#E8E2D2' : '#19C3C9';
+  x.fillStyle = '#20282E'; x.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 1400; i++) {
+    const a = Math.random() * Math.PI * 2, r = 22 + Math.random() * 104;
+    x.fillStyle = Math.random() < 0.85 ? '#D9D4C6' : '#5A646B';
     x.fillRect(128 + Math.cos(a) * r, 128 + Math.sin(a) * r, 2, 2);
   }
-  x.fillStyle = '#0A2233'; x.beginPath(); x.arc(128, 128, 22, 0, Math.PI * 2); x.fill();
+  x.fillStyle = '#2A3238'; x.beginPath(); x.arc(128, 128, 22, 0, Math.PI * 2); x.fill();
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
+/**
+ * Hull-cleaning drone: low chamfered chassis, four ducted corner thrusters, hi-vis bumpers,
+ * a sensor bar at the front, brush head and jet ring facing the hull.
+ * Local axes: +X forward, +Y away from the hull, -Y toward the hull.
+ */
 export class Robot {
   group = new THREE.Group();
   body = new THREE.Group();
@@ -49,90 +58,117 @@ export class Robot {
   tetherMat: THREE.MeshStandardMaterial;
   private tetherFrame = 0;
   leds: THREE.MeshBasicMaterial;
+  props: THREE.Object3D[] = [];
   u = 0.5; t = 0.6;
   onHull = false;
 
   constructor() {
-    const navy = addCaustics(new THREE.MeshPhysicalMaterial({ color: '#0E2A3D', roughness: 0.35, clearcoat: 0.7 }), 0.3);
-    const white = addCaustics(new THREE.MeshPhysicalMaterial({ color: '#EEF1EE', roughness: 0.4, clearcoat: 0.5 }), 0.3);
-    const cyan = addCaustics(new THREE.MeshStandardMaterial({ color: '#19C3C9', roughness: 0.45 }), 0.3);
-    const dark = new THREE.MeshStandardMaterial({ color: '#141B21', roughness: 0.6, metalness: 0.3 });
-    const glass = new THREE.MeshPhysicalMaterial({ color: '#203845', roughness: 0.02, metalness: 0.2, transmission: 0, clearcoat: 1, opacity: 0.85, transparent: true });
+    const shellMat = addCaustics(new THREE.MeshPhysicalMaterial({ color: '#1B3346', roughness: 0.42, metalness: 0.1, clearcoat: 0.5, clearcoatRoughness: 0.3 }), 0.1);
+    const panelMat = addCaustics(new THREE.MeshPhysicalMaterial({ color: '#E9ECEA', roughness: 0.45, clearcoat: 0.4 }), 0.1);
+    const darkMat = addCaustics(new THREE.MeshStandardMaterial({ color: '#14191D', roughness: 0.6, metalness: 0.3 }), 0.1);
+    const hiVis = addCaustics(new THREE.MeshStandardMaterial({ color: '#F08A24', roughness: 0.5 }), 0.1);
+    const alu = new THREE.MeshStandardMaterial({ color: '#AEB6BB', metalness: 1, roughness: 0.32 });
+    const glass = new THREE.MeshPhysicalMaterial({ color: '#0B141A', roughness: 0.05, metalness: 0.3, clearcoat: 1 });
 
-    // the robot's local -Y faces the hull; +X is forward
-    const hull = new THREE.Mesh(new RoundedBoxGeometry(0.66, 0.2, 0.5, 4, 0.06), navy);
-    this.body.add(hull);
-    const float = new THREE.Mesh(new RoundedBoxGeometry(0.6, 0.14, 0.46, 4, 0.06), white);
-    float.position.y = 0.16;
-    this.body.add(float);
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.61, 0.03, 0.47), cyan);
-    stripe.position.y = 0.105;
-    this.body.add(stripe);
-    const logo = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.17), new THREE.MeshBasicMaterial({ map: logoTexture(), transparent: true }));
-    logo.rotation.x = -Math.PI / 2;
-    logo.position.set(-0.02, 0.232, 0);
-    this.body.add(logo);
-    // camera dome + lights at the front
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.075, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), glass);
-    dome.rotation.z = -Math.PI / 2;
-    dome.position.set(0.33, 0.02, 0);
-    this.body.add(dome);
-    this.leds = new THREE.MeshBasicMaterial({ color: '#E8FBFF', toneMapped: false });
-    for (const z of [-0.17, 0.17]) {
-      const l = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.02, 16), this.leds);
-      l.rotation.z = Math.PI / 2;
-      l.position.set(0.335, 0.03, z);
-      this.body.add(l);
+    const W = 0.78, D = 0.6; // length (x), width (z)
+    // chamfered chassis: low, flat, wide, so it can sit against a hull
+    const chamfer = (w: number, d: number, c: number) => {
+      const sh = new THREE.Shape();
+      sh.moveTo(-w / 2 + c, -d / 2); sh.lineTo(w / 2 - c, -d / 2); sh.lineTo(w / 2, -d / 2 + c); sh.lineTo(w / 2, d / 2 - c);
+      sh.lineTo(w / 2 - c, d / 2); sh.lineTo(-w / 2 + c, d / 2); sh.lineTo(-w / 2, d / 2 - c); sh.lineTo(-w / 2, -d / 2 + c); sh.closePath();
+      return sh;
+    };
+    const slab = (w: number, d: number, c: number, h: number, bevel: number) => {
+      const g = new THREE.ExtrudeGeometry(chamfer(w, d, c), { depth: h, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 1 });
+      g.rotateX(-Math.PI / 2); // extrude along +y
+      return g;
+    };
+    const chassis = new THREE.Mesh(slab(W, D, 0.15, 0.07, 0.012), shellMat);
+    chassis.position.y = -0.06;
+    this.body.add(chassis);
+    // raised top panel with the wordmark
+    const panel = new THREE.Mesh(slab(0.4, 0.26, 0.05, 0.035, 0.008), panelMat);
+    panel.position.set(-0.03, 0.02, 0);
+    this.body.add(panel);
+    const word = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.0375), new THREE.MeshBasicMaterial({ map: wordmarkTexture(), transparent: true }));
+    word.rotation.x = -Math.PI / 2;
+    word.position.set(-0.03, 0.0645, 0);
+    this.body.add(word);
+    // hi-vis bumper along both long edges (so divers and tenders can spot it)
+    for (const sz of [-1, 1]) {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(W - 0.32, 0.05, 0.03), hiVis);
+      b.position.set(0, -0.025, sz * (D / 2 + 0.008));
+      this.body.add(b);
     }
-    const status = new THREE.Mesh(new THREE.SphereGeometry(0.014, 8, 8), new THREE.MeshBasicMaterial({ color: '#FF6B4A', toneMapped: false }));
-    status.position.set(-0.3, 0.12, 0.17);
-    this.body.add(status);
-    // thrusters: 4 vectored + 2 vertical
-    const ductGeo = new THREE.TorusGeometry(0.055, 0.016, 8, 20);
-    const hubGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.06, 10);
-    for (const [x, z, a] of [[0.27, 0.25, 0.8], [0.27, -0.25, -0.8], [-0.27, 0.25, -0.8], [-0.27, -0.25, 0.8]] as const) {
+    // four ducted thrusters in the chamfered corners
+    const duct = new THREE.CylinderGeometry(0.075, 0.075, 0.07, 28, 1, true);
+    const lip = new THREE.TorusGeometry(0.075, 0.009, 8, 28); lip.rotateX(Math.PI / 2);
+    const hub = new THREE.CylinderGeometry(0.02, 0.024, 0.05, 10);
+    const blade = new THREE.BoxGeometry(0.12, 0.004, 0.026);
+    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
       const g = new THREE.Group();
-      const duct = new THREE.Mesh(ductGeo, dark);
-      const hub = new THREE.Mesh(hubGeo, dark);
-      hub.rotation.x = Math.PI / 2;
-      g.add(duct, hub);
-      g.position.set(x, 0, z);
-      g.rotation.y = a;
+      g.add(new THREE.Mesh(duct, new THREE.MeshStandardMaterial({ color: '#14191D', roughness: 0.6, side: THREE.DoubleSide })));
+      const l1 = new THREE.Mesh(lip, hiVis); l1.position.y = 0.035; g.add(l1);
+      g.add(new THREE.Mesh(hub, alu));
+      const pr = new THREE.Group();
+      for (let k = 0; k < 3; k++) { const b = new THREE.Mesh(blade, alu); b.rotation.y = (k * Math.PI * 2) / 3; b.rotation.x = 0.4; pr.add(b); }
+      g.add(pr);
+      this.props.push(pr);
+      g.position.set(sx * (W / 2 - 0.05), -0.02, sz * (D / 2 - 0.05));
+      // small strut to the chassis
+      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.02), darkMat);
+      strut.position.set(-sx * 0.06, 0, -sz * 0.06); strut.rotation.y = sx * sz * Math.PI / 4;
+      g.add(strut);
       this.body.add(g);
     }
-    for (const x of [-0.18, 0.18]) {
-      const duct = new THREE.Mesh(ductGeo, dark);
-      duct.rotation.x = Math.PI / 2;
-      duct.position.set(x, 0.24, 0.17);
-      this.body.add(duct);
-    }
-    // brush head underneath
-    this.brush = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.05, 32), [
-      new THREE.MeshStandardMaterial({ color: '#1C2730', roughness: 0.8 }),
+    // sensor bar across the front: one wide camera window and a sonar puck
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.3), darkMat);
+    bar.position.set(W / 2 - 0.02, -0.02, 0);
+    this.body.add(bar);
+    const win = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.026, 0.22), glass);
+    win.position.set(W / 2 + 0.006, -0.02, 0);
+    this.body.add(win);
+    const sonar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.02, 20), alu);
+    sonar.position.set(0.12, 0.012, 0.17);
+    this.body.add(sonar);
+    // light bars under the front edge, shining at the hull
+    this.leds = new THREE.MeshBasicMaterial({ color: '#F2FBFF', toneMapped: false });
+    const led = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.006, 0.26), this.leds);
+    led.position.set(W / 2 - 0.02, -0.068, 0);
+    this.body.add(led);
+    // status light and tether port at the back
+    const status = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.012, 0.012), new THREE.MeshBasicMaterial({ color: '#19C3C9', toneMapped: false }));
+    status.position.set(-W / 2 + 0.03, 0.02, 0.1);
+    this.body.add(status);
+    const port = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.06, 10), alu);
+    port.rotation.z = Math.PI / 2;
+    port.position.set(-W / 2 - 0.01, -0.01, 0);
+    this.body.add(port);
+    // brush head underneath with suction skirt and cavitation jet ring
+    this.brush = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.035, 36), [
+      new THREE.MeshStandardMaterial({ color: '#20282E', roughness: 0.8 }),
       new THREE.MeshStandardMaterial({ map: bristleTexture(), roughness: 0.9 }),
       new THREE.MeshStandardMaterial({ map: bristleTexture(), roughness: 0.9 }),
     ]);
-    this.brush.position.y = -0.13;
+    this.brush.position.y = -0.1;
     this.body.add(this.brush);
-    // cavitation jet ring around the brush
-    this.jetRing = new THREE.Mesh(new THREE.TorusGeometry(0.23, 0.014, 8, 40), new THREE.MeshStandardMaterial({ color: '#B9C2C8', metalness: 1, roughness: 0.25, emissive: '#19C3C9', emissiveIntensity: 0 }));
-    this.jetRing.rotation.x = Math.PI / 2;
-    this.jetRing.position.y = -0.11;
-    this.body.add(this.jetRing);
-    // skirt / suction shroud
-    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.27, 0.05, 32, 1, true), dark);
-    skirt.position.y = -0.12;
+    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(0.235, 0.245, 0.04, 36, 1, true), new THREE.MeshStandardMaterial({ color: '#151A1E', roughness: 0.7, side: THREE.DoubleSide }));
+    skirt.position.y = -0.095;
     this.body.add(skirt);
+    this.jetRing = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.011, 8, 48), new THREE.MeshStandardMaterial({ color: '#AEB6BB', metalness: 1, roughness: 0.3, emissive: '#19C3C9', emissiveIntensity: 0 }));
+    this.jetRing.rotation.x = Math.PI / 2;
+    this.jetRing.position.y = -0.085;
+    this.body.add(this.jetRing);
 
-    this.spot = new THREE.SpotLight('#E6FBFF', 26, 7, 0.65, 0.5, 1.4);
-    this.spot.position.set(0.33, 0.03, 0);
-    this.spotTarget.position.set(1.5, -0.6, 0);
+    this.spot = new THREE.SpotLight('#E8F7FA', 9, 6, 0.75, 0.6, 1.5);
+    this.spot.position.set(W / 2 - 0.03, -0.08, 0);
+    this.spotTarget.position.set(1.4, -0.9, 0);
     this.body.add(this.spot, this.spotTarget);
     this.spot.target = this.spotTarget;
 
     this.group.add(this.body);
 
-    this.tetherMat = new THREE.MeshStandardMaterial({ color: '#F0C030', roughness: 0.6 });
+    this.tetherMat = new THREE.MeshStandardMaterial({ color: '#F08A24', roughness: 0.6, emissive: '#F08A24', emissiveIntensity: 0.15 });
     this.tether = new THREE.Mesh(new THREE.BufferGeometry(), this.tetherMat);
     this.tether.frustumCulled = false;
   }
@@ -149,23 +185,24 @@ export class Robot {
     const right = new THREE.Vector3().crossVectors(fwd, up).normalize();
     const m = new THREE.Matrix4().makeBasis(fwd, up, right);
     const q = new THREE.Quaternion().setFromRotationMatrix(m);
-    this.group.position.copy(p).addScaledVector(n, 0.17);
+    this.group.position.copy(p).addScaledVector(n, 0.125);
     this.group.quaternion.slerp(q, 0.25);
   }
 
-  /** Brush spin and jet glow. */
+  /** Brush spin, thruster spin and jet glow. */
   animate(dt: number, brushing: boolean, jetting: boolean) {
-    this.brush.rotation.y += dt * (brushing || jetting ? 22 : 2);
+    const working = brushing || jetting;
+    this.brush.rotation.y += dt * (working ? 22 : 2);
+    this.props.forEach((p) => { p.rotation.y += dt * (working ? 30 : 8); });
     const m = this.jetRing.material as THREE.MeshStandardMaterial;
-    m.emissiveIntensity = THREE.MathUtils.lerp(m.emissiveIntensity, jetting ? 2.2 : 0, 0.2);
-    this.leds.color.setScalar(1.6 + Math.sin(causticUniforms.uTime.value * 3) * 0.05);
+    m.emissiveIntensity = THREE.MathUtils.lerp(m.emissiveIntensity, jetting ? 1.6 : 0, 0.2);
   }
 
-  /** Rebuild the yellow tether from the tender to the robot (throttled). */
+  /** Rebuild the tether from the tender to the robot (throttled). */
   updateTether(from: THREE.Vector3) {
     if (this.tetherFrame++ % 3) return;
     const to = new THREE.Vector3();
-    this.body.localToWorld(to.set(-0.33, 0.12, 0));
+    this.body.localToWorld(to.set(-0.42, -0.01, 0));
     const mid1 = from.clone().lerp(to, 0.35); mid1.y -= 1.2;
     const mid2 = from.clone().lerp(to, 0.7); mid2.y -= 0.8;
     const curve = new THREE.CatmullRomCurve3([from, mid1, mid2, to]);

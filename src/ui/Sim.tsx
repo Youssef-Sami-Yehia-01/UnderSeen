@@ -7,9 +7,11 @@ import { makeYacht, healthScore, SEVERITY_LABEL, type Yacht } from '../lib/yacht
 import * as sound from '../lib/sound';
 import { saveStart, saveFinish } from '../lib/api';
 import OwnerApp, { type AppData } from './app/OwnerApp';
-import { REDSEA_PHOTO } from '../lib/photos';
+import { REDSEA_PHOTO, YACHT_PHOTOS } from '../lib/photos';
+import { HullShape } from '../three/hull';
 
-type UIPhase = Phase | 'ping' | 'app';
+type UIPhase = Phase | 'loading' | 'ping' | 'app';
+const LANDING_PHOTO = YACHT_PHOTOS[0];
 
 const fmtTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const GROWTH_COLOR = { light: '#7FD36E', medium: '#E9A23B', heavy: '#FF6B4A' } as const;
@@ -46,18 +48,20 @@ export default function Sim() {
     return () => window.removeEventListener('resize', f);
   }, []);
 
-  useEffect(() => {
-    if (!mount.current) return;
+  // the 3D world is only created after the visitor enters a name
+  const ensureExp = (initial: Yacht) => {
+    if (exp.current || !mount.current) return exp.current;
     const e = new Experience(mount.current, {
       phase: (p) => setPhase(p),
       stats: (s) => setStats(s),
       scan: (k) => setScanK(k),
       labels: (l) => setLabels(l),
-    });
+    }, initial);
     exp.current = e;
     if (new URLSearchParams(location.search).has('debug')) (window as unknown as { __us: Experience }).__us = e;
-    return () => e.dispose();
-  }, []);
+    return e;
+  };
+  useEffect(() => () => { exp.current?.dispose(); exp.current = null; }, []);
 
   // autopilot ends on its own when the path is done
   useEffect(() => {
@@ -69,12 +73,17 @@ export default function Sim() {
   const submitName = (ev: React.FormEvent) => {
     ev.preventDefault();
     const n = name.trim().slice(0, 24);
-    if (!n || !exp.current) return;
+    if (!n || phase === 'loading') return;
     sound.unlockAudio();
     try { localStorage.setItem('us:name', n); } catch { /* storage off */ }
     const y = makeYacht(n);
     setYacht(y);
-    exp.current.showYacht(y);
+    setPhase('loading');
+    // let the loading state paint before the 3D world is built
+    setTimeout(() => {
+      const e = ensureExp(y);
+      e?.showYacht(y);
+    }, 80);
     void saveStart({ name: n, yacht: y.name, lengthFt: y.lengthFt, fouling: y.fouling });
   };
 
@@ -130,20 +139,13 @@ export default function Sim() {
     setTool('auto');
     setCam('follow');
     const e = exp.current;
-    if (e) {
-      e.phase = 'landing';
-      e.setYacht(makeYacht('UNDERSEEN'), true);
-      e.controls.enabled = true;
-      e.controls.autoRotate = true;
-      e.controls.minPolarAngle = 0.55; e.controls.maxPolarAngle = 1.45;
-      e.controls.minDistance = e.shape.L * 0.8; e.controls.maxDistance = e.shape.L * 3;
-      e.controls.target.set(0, 1.4, 0);
-    }
+    if (e) e.phase = 'landing';
   };
 
   const toggleMute = () => { const m = !muted; setMutedState(m); sound.setMuted(m); };
 
-  const canScan = !!stats && stats.coverage >= 0.8 && stats.barnaclesLeft <= Math.max(6, stats.barnaclesTotal * 0.08);
+  const hardLeft = !!stats && stats.barnaclesLeft > Math.max(6, stats.barnaclesTotal * 0.12);
+  const canScan = !!stats && stats.coverage >= 0.8 && !hardLeft;
 
   const tip = useMemo(() => {
     if (!stats) return { warn: false, el: <>Press and drag on the hull to steer the robot. Hold still over barnacles to let the jet work.</> };
@@ -151,9 +153,10 @@ export default function Sim() {
     if (stats.activeTool === 'jet') return { warn: false, el: <><b>Cavitation jet on.</b> Bubbles collapse against the shell and crack the cement without stripping the paint.</> };
     if (stats.activeTool === 'brush') return { warn: false, el: <><b>Brushing.</b> Soft nylon bristles lift the slime and weed. Suction pulls it into the filter, so nothing is left in the marina.</> };
     if (canScan) return { warn: false, el: <><b>Hull clean.</b> Start the 3D scan to compare it with last month.</> };
+    if (stats.coverage >= 0.8 && hardLeft) return { warn: true, el: <><b>Hard growth is still on the hull.</b> Barnacles need the jet. Turn on Autopilot to finish them.</> };
     if (stats.coverage > 0.35 && !auto) return { warn: false, el: <>Getting tired? Turn on <b>Autopilot</b> and the robot will finish the hull in rows.</> };
     return { warn: false, el: <>Press and drag on the hull to steer the robot. The <b>Auto</b> tool switches to the jet when it finds barnacles.</> };
-  }, [stats, canScan, auto]);
+  }, [stats, canScan, auto, hardLeft]);
 
   const y = yacht;
   const st = stats;
@@ -166,29 +169,35 @@ export default function Sim() {
       <div className="topbar">
         {phase === 'clean' || phase === 'dive' || phase === 'scan' || phase === 'result' ? (
           <span className="live"><i />{phase === 'scan' ? '3D SCAN' : 'LIVE · ROBOT CAM'}<span className="sep" />{fmtTime(st?.seconds ?? 0)}</span>
-        ) : phase === 'app' || phase === 'ping' ? <span /> : (
-          <div className="brand"><img src="/logo-navy.png" alt="UNDERSEEN" /></div>
-        )}
-        {phase !== 'app' && (
+        ) : phase === 'intro' ? (
+          <div className="brand"><img src="/logo-h-navy.png" alt="UNDERSEEN" /></div>
+        ) : <span />}
+        {phase !== 'app' && phase !== 'landing' && phase !== 'loading' && (
           <button className="iconbtn" onClick={toggleMute} aria-label={muted ? 'Turn sound on' : 'Turn sound off'}>
             {muted ? <VolumeX /> : <Volume2 />}
           </button>
         )}
       </div>
 
-      {/* landing */}
-      {phase === 'landing' && (
-        <form className="dock glass" onSubmit={submitName}>
-          <div className="eyebrow">Yachting &amp; marine · Red Sea</div>
-          <h1 className="h-xl">Dive under your yacht.</h1>
-          <p className="lede">Type your name and we will find your yacht in the marina. Then clean its hull with our robot and get the 3D report on your phone.</p>
-          <div className="field">
-            <label htmlFor="owner">Your name</label>
-            <input id="owner" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Youssef" maxLength={24} autoComplete="given-name" />
-          </div>
-          <button className="btn btn-primary" type="submit" disabled={!name.trim()}>Find my yacht <ArrowRight /></button>
-          <p className="fineprint">Every name gets a different yacht with its own problems. Drag to look around the marina.</p>
-        </form>
+      {/* landing: photo first, the 3D starts after the name */}
+      {(phase === 'landing' || phase === 'loading') && (
+        <div className="landing">
+          <img className="landing-photo" src={LANDING_PHOTO.src} alt={LANDING_PHOTO.alt} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+          <div className="landing-shade" />
+          <header className="landing-top"><img src="/logo-h-white.png" alt="UNDERSEEN" /></header>
+          <form className="landing-copy" onSubmit={submitName}>
+            <div className="landing-eyebrow">Yachting &amp; marine · Hurghada, Red Sea</div>
+            <h1 className="landing-title">Dive under your yacht.</h1>
+            <p className="landing-lede">Type your name and we will find your yacht in the marina. Then steer our robot to clean its hull, run a 3D scan and get the report on your phone.</p>
+            <label htmlFor="owner" className="landing-label">Your name</label>
+            <div className="landing-row">
+              <input id="owner" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Youssef" maxLength={24} autoComplete="given-name" disabled={phase === 'loading'} />
+              <button className="btn btn-light" type="submit" disabled={!name.trim() || phase === 'loading'}>{phase === 'loading' ? 'Finding your yacht…' : 'Find my yacht'}{phase !== 'loading' && <ArrowRight />}</button>
+            </div>
+            <p className="landing-fine">Every name gets a different yacht with its own problems. Turn your sound on.</p>
+          </form>
+          <span className="landing-credit">Photo: {LANDING_PHOTO.credit}</span>
+        </div>
       )}
 
       {/* intro */}
@@ -202,7 +211,7 @@ export default function Sim() {
             <div><small>Hull</small><b><span className="swatch" style={{ background: y.hullColor }} />{y.hullColorName}</b></div>
             <div><small>Last cleaned</small><b>{y.weeksSinceClean} weeks ago</b></div>
             <div><small>Growth</small><b className="growth"><i style={{ background: GROWTH_COLOR[y.fouling] }} /><span style={{ textTransform: 'capitalize' }}>{y.fouling}</span></b></div>
-            <div><small>Barnacles</small><b>~{y.barnacleCount + 30}</b></div>
+            <div><small>Hull area</small><b>{Math.round(new HullShape(y.lengthM, y.beamM).area())} m²</b></div>
           </div>
           <div className="row2">
             <button className="btn btn-primary" onClick={startDive}>Start the dive <ArrowRight /></button>
@@ -227,15 +236,14 @@ export default function Sim() {
             <button className="iconbtn" onClick={() => exp.current?.zoom(0.5)} aria-label="Zoom out"><Minus /></button>
           </div>
           <div className="hud-panel glass">
-            <div className="hud-head"><h2>Clean the hull</h2><span>{st ? `${Math.round(st.areaM2)} m² done` : ''}</span></div>
+            <div className="hud-head"><h2>Clean the hull</h2><span>{y ? `MY ${y.name}` : ''}</span></div>
             <div className="tools" role="group" aria-label="Cleaning tool">
               <button aria-pressed={tool === 'auto'} onClick={() => { setTool('auto'); exp.current?.setTool('auto'); }}><Sparkles />Auto<span className="sub">picks the tool</span></button>
               <button aria-pressed={tool === 'brush'} onClick={() => { setTool('brush'); exp.current?.setTool('brush'); }}><Paintbrush />Brush<span className="sub">soft growth</span></button>
               <button className="jet" aria-pressed={tool === 'jet'} onClick={() => { setTool('jet'); exp.current?.setTool('jet'); }}><Waves />Jet<span className="sub">barnacles</span></button>
             </div>
-            <div className="meters">
-              <div className="meter"><small>Hull cleaned <b>{Math.round((st?.coverage ?? 0) * 100)}%</b></small><div className="bar"><i style={{ width: `${Math.round((st?.coverage ?? 0) * 100)}%` }} /></div></div>
-              <div className="meter"><small>Barnacles left <b>{st?.barnaclesLeft ?? '–'}</b></small><div className="bar coral"><i style={{ width: `${st ? Math.round((st.barnaclesLeft / Math.max(1, st.barnaclesTotal)) * 100) : 100}%` }} /></div></div>
+            <div className="meters one">
+              <div className="meter"><small>Hull cleaned <b>{st ? `${Math.round(st.areaM2)} of ${Math.round(st.totalM2)} m²` : '–'}</b></small><div className="bar"><i style={{ width: `${Math.round((st?.coverage ?? 0) * 100)}%` }} /></div></div>
             </div>
             <div className={`tip${tip.warn ? ' warn' : ''}`}>{tip.warn ? <AlertTriangle /> : <Info />}<span>{tip.el}</span></div>
             <div className="actions">

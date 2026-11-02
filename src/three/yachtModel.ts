@@ -98,7 +98,7 @@ export function buildYacht(y: Yacht, skin: THREE.Texture, opts: { detail?: 'high
   const steelMat = track(new THREE.MeshStandardMaterial({ color: '#DDE2E6', metalness: 1, roughness: 0.18 }));
   const teakMat = track(new THREE.MeshStandardMaterial({ color: '#A57A4E', roughness: 0.7 }));
   const darkMat = track(new THREE.MeshStandardMaterial({ color: '#20262C', roughness: 0.5 }));
-  const underMat = track(addCaustics(new THREE.MeshStandardMaterial({ map: skin, roughness: 0.82, metalness: 0, side: THREE.DoubleSide }), 0.26)) as THREE.MeshStandardMaterial;
+  const underMat = track(addCaustics(new THREE.MeshStandardMaterial({ map: skin, roughness: 0.85, metalness: 0, side: THREE.DoubleSide }), 0.07)) as THREE.MeshStandardMaterial;
   const bronzeMat = track(addCaustics(new THREE.MeshStandardMaterial({ color: '#B88B54', metalness: 1, roughness: 0.32 }), 0.4));
   const shaftMat = track(addCaustics(new THREE.MeshStandardMaterial({ color: '#B9C2C8', metalness: 1, roughness: 0.25 }), 0.4));
   const zincMat = track(addCaustics(new THREE.MeshStandardMaterial({ color: '#AEB4B6', metalness: 0.6, roughness: 0.55 }), 0.4));

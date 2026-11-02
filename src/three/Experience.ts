@@ -29,6 +29,7 @@ export interface CleanStats {
   brushOnBarnacles: boolean;
   seconds: number;
   areaM2: number;
+  totalM2: number;
   debrisKg: number;
 }
 export interface Label { id: string; x: number; y: number; visible: boolean }
@@ -85,7 +86,9 @@ export class Experience {
   envAbove: THREE.Texture;
   envUnder: THREE.Texture;
   fogAbove = new THREE.Fog('#E3D3C3', 500, 3200);
-  fogUnder = new THREE.FogExp2(UNDERWATER_COLOR.getHex(), 0.085);
+  fogUnder = new THREE.FogExp2('#1E5F6D', 0.075);
+  private waterDome: THREE.Mesh;
+  private camSide = 1;
   underwater = false;
 
   // yacht
@@ -109,7 +112,7 @@ export class Experience {
   private target: { u: number; t: number } | null = null;
   private raycaster = new THREE.Raycaster();
   private ndc = new THREE.Vector2();
-  private camDist = 3.4;
+  private camDist = 4.2;
   private camTarget = new THREE.Vector3();
   private heading = new THREE.Vector3(1, 0, 0);
   private activeTool: Tool | null = null;
@@ -132,8 +135,9 @@ export class Experience {
   shots: Record<string, { now: string; before: string }> = {};
   heroImage = '';
   timeScale = 1;
+  private used = false;
 
-  constructor(container: HTMLElement, ev: Events) {
+  constructor(container: HTMLElement, ev: Events, initial?: Yacht) {
     this.container = container;
     this.ev = ev;
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -169,6 +173,15 @@ export class Experience {
     this.sun.position.copy(SUN_DIR).multiplyScalar(120);
     s.add(this.hemi, this.sun, this.fill, this.sky, this.water.mesh, this.seabed.group, this.shafts, this.snow, this.fish.fish, this.mountains, this.pontoon, this.tender);
     s.add(this.robot.group, this.robot.tether);
+    // underwater sky: lighter toward the surface, dark below, follows the camera
+    this.waterDome = new THREE.Mesh(new THREE.SphereGeometry(80, 32, 16), new THREE.ShaderMaterial({
+      side: THREE.BackSide, depthWrite: false, fog: false,
+      vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+      fragmentShader: 'varying vec3 vD; void main(){ float h = vD.y; vec3 top = vec3(0.05,0.36,0.44); vec3 mid = vec3(0.013,0.114,0.153); vec3 low = vec3(0.004,0.04,0.06); vec3 c = h > 0.0 ? mix(mid, top, pow(h, 0.7)) : mix(mid, low, pow(-h, 0.6)); gl_FragColor = vec4(c, 1.0); }',
+    }));
+    this.waterDome.renderOrder = -2;
+    this.waterDome.visible = false;
+    s.add(this.waterDome);
     this.robot.group.visible = false;
     this.robot.tether.visible = false;
 
@@ -198,11 +211,11 @@ export class Experience {
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.42, 0.5, 0.9);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.3, 0.45, 0.94);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
-    this.setYacht(makeYacht('UNDERSEEN'), true);
+    this.setYacht(initial ?? makeYacht('UNDERSEEN'), true);
 
     const el = this.renderer.domElement;
     el.addEventListener('pointerdown', this.onDown);
@@ -273,6 +286,7 @@ export class Experience {
       n.group.position.set(px + 1.25 + 1.0 + ny.lengthM / 2, 0, z + (side > 0 && i === 0 ? 3.2 : 0));
       if (i === 0) n.group.position.z += 2.6; // leave room for the tender
       this.scene.add(n.group);
+      n.group.visible = !this.underwater;
       this.neighbours.push(n);
     });
   }
@@ -297,11 +311,14 @@ export class Experience {
     this.underwater = u;
     const s = this.scene;
     s.fog = u ? this.fogUnder : this.fogAbove;
-    s.background = u ? new THREE.Color('#06303F') : null;
+    s.background = u ? new THREE.Color('#1E5F6D') : null;
+    this.waterDome.visible = u;
+    // below the surface only your yacht is shown, so its hull never gets confused with the next berth
+    this.neighbours.forEach((n) => { n.group.visible = !u; });
     s.environment = u ? this.envUnder : this.envAbove;
     this.sky.visible = !u;
     this.mountains.visible = !u;
-    this.shafts.visible = u;
+    this.shafts.visible = false;
     this.snow.visible = u;
     this.water.mat.uniforms.uUnder.value = u ? 1 : 0;
     this.hemi.color.set(u ? '#7FD3DC' : '#D8ECF7');
@@ -309,7 +326,7 @@ export class Experience {
     this.hemi.intensity = u ? 1.5 : 0.75;
     this.sun.intensity = u ? 0.8 : 2.2;
     this.sun.color.set(u ? '#9EE3EA' : '#FFE2C0');
-    this.fill.intensity = u ? 1.5 : 0;
+    this.fill.intensity = u ? 1.1 : 0;
     s.environmentIntensity = u ? 0.9 : 0.55;
     this.renderer.toneMappingExposure = u ? 1.0 : 0.62;
     sound.setLoops({ ambience: u ? 1 : 0 });
@@ -407,7 +424,7 @@ export class Experience {
 
   /** Called after the visitor enters their name. */
   showYacht(y: Yacht) {
-    this.setYacht(y);
+    if (!this.yacht || this.yacht.owner !== y.owner || this.used) { this.setYacht(y); this.used = false; }
     this.phase = 'intro';
     const { L, B } = this.shape;
     this.controls.enabled = true;
@@ -419,6 +436,7 @@ export class Experience {
   }
 
   startDive() {
+    this.used = true;
     this.phase = 'dive';
     this.ev.phase('dive');
     this.controls.enabled = false;
@@ -453,7 +471,7 @@ export class Experience {
     this.robot.tether.visible = true;
     this.robot.group.position.copy(robotStart);
     this.robot.group.quaternion.identity();
-    this.camDist = 3.4;
+    this.camDist = 4.2;
     this.seq = {
       start: this.clock.elapsedTime, dur: 7.2,
       update: (k) => {
@@ -573,6 +591,7 @@ export class Experience {
       brushOnBarnacles: this.brushOnBarnacles,
       seconds: this.phase === 'clean' ? this.clock.elapsedTime - this.cleanStart : this.cleanSeconds,
       areaM2: area * cov,
+      totalM2: area,
       debrisKg: area * cov * (this.yacht.fouling === 'heavy' ? 0.55 : this.yacht.fouling === 'medium' ? 0.3 : 0.12) + f.removed * 0.004,
     };
   }
@@ -796,7 +815,12 @@ export class Experience {
     if (this.camMode === 'follow') {
       const rp = r.group.position;
       const n = s.underNormal(r.u, r.t);
-      const want = rp.clone().addScaledVector(n, this.camDist).addScaledVector(this.heading, -this.camDist * 0.55).add(new THREE.Vector3(0, -0.35 * this.camDist, 0));
+      // stay on the robot's side of the boat (with some hysteresis) and look along the hull, not straight up at it
+      if (r.t > 0.18) this.camSide = 1; else if (r.t < -0.18) this.camSide = -1;
+      const d = this.camDist;
+      const want = rp.clone()
+        .addScaledVector(n, d * 0.55)
+        .add(new THREE.Vector3(-d * 0.5, -d * 0.5, this.camSide * d * 0.55));
       want.y = Math.min(want.y, -0.3);
       want.y = Math.max(want.y, SEABED_Y + 0.8);
       const k = 1 - Math.pow(0.02, dt);
@@ -863,6 +887,7 @@ export class Experience {
 
     this.setUnderwater(this.camera.position.y < 0);
     this.snow.position.copy(this.camera.position);
+    this.waterDome.position.copy(this.camera.position);
     this.shafts.children.forEach((m, i) => { m.rotation.z = 0.3 + Math.sin(t * 0.15 + i) * 0.06; });
     // gentle yacht motion above water
     if (this.parts) {
@@ -892,11 +917,28 @@ export class Experience {
   };
 
   private offsetOn = false;
+  private panelCheck = 0;
+  private panelInset: [number, number] = [0, 0];
   private applyViewOffset() {
     const w = this.container.clientWidth, h = this.container.clientHeight;
     const want = (this.phase === 'landing' || this.phase === 'intro') && w > 900 && !this.seq;
+    // while cleaning, keep the robot in the part of the screen the control panel doesn't cover
+    let ox = 0, oy = 0;
+    if (this.phase === 'clean' && this.camMode === 'follow') {
+      const now = performance.now();
+      if (now - this.panelCheck > 400) {
+        this.panelCheck = now;
+        const el = document.querySelector('.hud-panel');
+        const r = el?.getBoundingClientRect();
+        this.panelInset = !r ? [0, 0] : r.width < w * 0.6 ? [-r.right / 2, 0] : [0, (h - r.top) * 0.45];
+      }
+      [ox, oy] = this.panelInset;
+    }
     if (want) {
       this.camera.setViewOffset(w, h, -w * 0.17, 0, w, h);
+      this.offsetOn = true;
+    } else if (ox || oy) {
+      this.camera.setViewOffset(w, h, ox, oy, w, h);
       this.offsetOn = true;
     } else if (this.offsetOn) {
       this.camera.clearViewOffset();

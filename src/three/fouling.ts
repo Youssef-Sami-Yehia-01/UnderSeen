@@ -3,8 +3,31 @@ import { HullShape } from './hull';
 import { addCaustics } from './environment';
 import { mulberry32, type Yacht, type Finding } from '../lib/yacht';
 
-export const SKIN_W = 1024;
-export const SKIN_H = 256;
+export const SKIN_W = 2048;
+export const SKIN_H = 512;
+
+/** Smooth value noise with a few octaves, for organic textures. */
+function makeNoise(seed: number) {
+  const r = mulberry32(seed);
+  const N = 256;
+  const g = new Float32Array(N * N);
+  for (let i = 0; i < g.length; i++) g[i] = r();
+  const n = (x: number, y: number) => {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const x0 = xi & 255, y0 = yi & 255, x1 = (x0 + 1) & 255, y1 = (y0 + 1) & 255;
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    const a = g[y0 * N + x0], b = g[y0 * N + x1], c = g[y1 * N + x0], d = g[y1 * N + x1];
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  };
+  const fbm = (x: number, y: number, oct = 4) => {
+    let sum = 0, amp = 0.5, f = 1, norm = 0;
+    for (let i = 0; i < oct; i++) { sum += amp * n(x * f, y * f); norm += amp; amp *= 0.5; f *= 2.03; }
+    return sum / norm;
+  };
+  return { n, fbm };
+}
+const hex = (h: string) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 export type Tool = 'brush' | 'jet';
 
 export interface Barnacle { u: number; t: number; hp: number; alive: boolean; idx: number; pos: THREE.Vector3; normal: THREE.Vector3; scale: number }
@@ -82,7 +105,9 @@ export class FoulingSystem {
   constructor(y: Yacht, shape: HullShape) {
     this.yacht = y;
     this.shape = shape;
-    const mk = () => { const c = document.createElement('canvas'); c.width = SKIN_W; c.height = SKIN_H; return c; };
+    // CPU-backed canvases: they are read back and redrawn every frame, and unlike GPU canvases
+    // they can't be wiped by a lost graphics context (seen on phones under memory pressure)
+    const mk = () => { const c = document.createElement('canvas'); c.width = SKIN_W; c.height = SKIN_H; c.getContext('2d', { willReadFrequently: true }); return c; };
     this.base = mk(); this.clean = mk(); this.skin = mk();
     this.paintBase(this.base.getContext('2d')!);
     const cx = this.clean.getContext('2d')!;
@@ -99,56 +124,74 @@ export class FoulingSystem {
   }
 
   private paintBase(x: CanvasRenderingContext2D) {
-    const r = mulberry32(this.yacht.seed ^ 0x1234);
-    x.fillStyle = this.yacht.antifoul;
-    x.fillRect(0, 0, SKIN_W, SKIN_H);
-    for (let i = 0; i < 9000; i++) {
-      x.fillStyle = r() < 0.5 ? 'rgba(255,255,255,.035)' : 'rgba(0,0,0,.06)';
-      x.fillRect(r() * SKIN_W, r() * SKIN_H, 1 + r() * 2, 1 + r() * 2);
+    // antifouling paint with soft roller mottling
+    const { fbm } = makeNoise(this.yacht.seed ^ 0x1234);
+    const img = x.createImageData(SKIN_W, SKIN_H);
+    const d = img.data;
+    const [br, bg, bb] = hex(this.yacht.antifoul);
+    const aspect = this.shape.L / (this.shape.girth(0.5) || 1);
+    for (let j = 0; j < SKIN_H; j++) {
+      const v = j / SKIN_H;
+      for (let i = 0; i < SKIN_W; i++) {
+        const u = i / SKIN_W;
+        const m = fbm(u * 60 * aspect, v * 60, 3) - 0.5;
+        const streak = fbm(u * 6 * aspect, v * 160, 2) - 0.5;
+        const k = 1 + m * 0.16 + streak * 0.08;
+        const o = (j * SKIN_W + i) * 4;
+        d[o] = br * k; d[o + 1] = bg * k; d[o + 2] = bb * k; d[o + 3] = 255;
+      }
     }
-    // faint roller marks along the hull
-    x.strokeStyle = 'rgba(255,255,255,.025)';
-    for (let yy = 0; yy < SKIN_H; yy += 7) { x.beginPath(); x.moveTo(0, yy + r() * 2); x.lineTo(SKIN_W, yy + r() * 2); x.stroke(); }
-    // keel band slightly worn
-    x.fillStyle = 'rgba(255,255,255,.04)';
-    x.fillRect(0, SKIN_H / 2 - 3, SKIN_W, 6);
+    x.putImageData(img, 0, 0);
   }
 
   private paintGrowth(x: CanvasRenderingContext2D) {
+    // slime, algae and weed painted from layered noise on top of the clean hull
     const y = this.yacht;
-    const r = mulberry32(y.seed ^ 0xbeef);
-    const lvl = y.fouling === 'light' ? 0.45 : y.fouling === 'medium' ? 0.75 : 1;
-    const cols = ['#5E7A3F', '#4A6131', '#73844A', '#3E532D', '#857A47', '#677D43', '#4F5F36'];
-    // base slime film over everything
-    x.fillStyle = `rgba(78,95,58,${0.55 * lvl + 0.25})`;
-    x.fillRect(0, 0, SKIN_W, SKIN_H);
-    const blobs = Math.round(2400 * lvl);
-    for (let i = 0; i < blobs; i++) {
-      const u = r(), t = r() * 2 - 1;
-      const edge = Math.abs(t);
-      if (r() > 0.35 + edge * 0.65) continue; // denser toward the waterline
-      const [px, py] = toPx(u, t);
-      const mU = SKIN_W / this.shape.L, mT = SKIN_H / this.shape.girth(u);
-      const rad = (0.03 + r() * 0.12) * (0.7 + edge * 0.8);
-      x.globalAlpha = 0.25 + r() * 0.5;
-      x.fillStyle = cols[(r() * cols.length) | 0];
-      x.beginPath(); x.ellipse(px, py, rad * mU, rad * mT, r() * 3, 0, Math.PI * 2); x.fill();
+    const { fbm, n } = makeNoise(y.seed ^ 0xbeef);
+    const lvl = y.fouling === 'light' ? 0.5 : y.fouling === 'medium' ? 0.78 : 1;
+    const img = x.getImageData(0, 0, SKIN_W, SKIN_H);
+    const d = img.data;
+    const aspect = this.shape.L / (this.shape.girth(0.5) || 1);
+    const slime = [96, 104, 70], algaeA = [74, 98, 46], algaeB = [118, 122, 64], brown = [112, 92, 58], dark = [40, 52, 30];
+    for (let j = 0; j < SKIN_H; j++) {
+      const v = j / SKIN_H;
+      const t = v * 2 - 1;
+      const edge = Math.abs(t); // 1 at the waterline
+      for (let i = 0; i < SKIN_W; i++) {
+        const u = i / SKIN_W;
+        const big = fbm(u * 9 * aspect, v * 9, 4);
+        const fine = n(u * 420 * aspect, v * 420);
+        const streak = fbm(u * 2.5 * aspect, v * 120, 3); // long streaks along the hull
+        // coverage: always a film, thicker toward the waterline and the stern
+        let cov = 0.55 + (big - 0.5) * 0.9 + edge * 0.35 + (u < 0.25 ? 0.12 : 0);
+        cov = Math.min(1, Math.max(0, cov * lvl + (lvl - 0.6) * 0.3));
+        // colour mix
+        const mixA = fbm(u * 5 * aspect + 40, v * 5, 3);
+        let r = slime[0], g = slime[1], b = slime[2];
+        const wa = Math.min(1, Math.max(0, (mixA - 0.38) * 3));
+        r += (algaeA[0] - r) * wa; g += (algaeA[1] - g) * wa; b += (algaeA[2] - b) * wa;
+        const wb = Math.min(1, Math.max(0, (streak - 0.55) * 4));
+        r += (algaeB[0] - r) * wb * 0.7; g += (algaeB[1] - g) * wb * 0.7; b += (algaeB[2] - b) * wb * 0.7;
+        const wc = Math.min(1, Math.max(0, (fbm(u * 14 * aspect + 9, v * 14, 2) - 0.6) * 4));
+        r += (brown[0] - r) * wc * 0.6; g += (brown[1] - g) * wc * 0.6; b += (brown[2] - b) * wc * 0.6;
+        // weed beard near the waterline: strands running down from the edge
+        if (edge > 0.82) {
+          const strand = n(u * 900 * aspect, v * 14);
+          const w = Math.min(1, (edge - 0.82) / 0.12) * (strand > 0.55 ? 1 : 0.35) * lvl;
+          r += (dark[0] + 20 - r) * w * 0.7; g += (dark[1] + 40 - g) * w * 0.7; b += (dark[2] + 10 - b) * w * 0.7;
+          cov = Math.min(1, cov + w * 0.4);
+        }
+        // fine grain and small dark pits
+        const shade = 0.82 + fine * 0.3 - (fine > 0.86 ? 0.25 : 0);
+        r *= shade; g *= shade; b *= shade;
+        const o = (j * SKIN_W + i) * 4;
+        const a = cov * 0.96;
+        d[o] = d[o] * (1 - a) + r * a;
+        d[o + 1] = d[o + 1] * (1 - a) + g * a;
+        d[o + 2] = d[o + 2] * (1 - a) + b * a;
+      }
     }
-    // weed beard near the waterline
-    x.globalAlpha = 1;
-    x.lineCap = 'round';
-    for (let i = 0; i < 1400 * lvl; i++) {
-      const u = r(), side = r() < 0.5 ? -1 : 1, t = side * (0.86 + r() * 0.14);
-      const [px, py] = toPx(u, t);
-      x.strokeStyle = r() < 0.5 ? 'rgba(70,105,50,.7)' : 'rgba(110,125,60,.6)';
-      x.lineWidth = 1 + r() * 1.5;
-      x.beginPath(); x.moveTo(px, py); x.lineTo(px + (r() - 0.5) * 4, py - side * (4 + r() * 10)); x.stroke();
-    }
-    // fine speckle
-    for (let i = 0; i < 6000; i++) {
-      x.fillStyle = r() < 0.5 ? 'rgba(200,190,150,.18)' : 'rgba(20,30,15,.2)';
-      x.fillRect(r() * SKIN_W, r() * SKIN_H, 1.5, 1.5);
-    }
+    x.putImageData(img, 0, 0);
   }
 
   private makeBarnacles() {
@@ -156,10 +199,22 @@ export class FoulingSystem {
     const r = mulberry32(y.seed ^ 0xb4);
     const pts: { u: number; t: number }[] = [];
     let guard = 0;
-    while (pts.length < y.barnacleCount && guard++ < 50000) {
+    // barnacles settle in patches: a few loners, most in colonies (stern, waterline, shaded areas)
+    const loners = Math.round(y.barnacleCount * 0.3);
+    while (pts.length < loners && guard++ < 50000) {
       const u = 0.02 + r() * 0.96, t = (r() * 2 - 1) * 0.985;
-      const w = 0.25 + Math.abs(t) * 0.55 + (u < 0.3 ? 0.35 : 0) + (r() < 0.04 ? 1 : 0);
+      const w = 0.25 + Math.abs(t) * 0.55 + (u < 0.3 ? 0.35 : 0);
       if (r() < w) pts.push({ u, t });
+    }
+    while (pts.length < y.barnacleCount && guard++ < 100000) {
+      const cu = 0.03 + r() * 0.94, ct = (r() * 2 - 1) * 0.95;
+      const w = 0.2 + Math.abs(ct) * 0.6 + (cu < 0.3 ? 0.4 : 0);
+      if (r() > w) continue;
+      const size = 8 + ((r() * 26) | 0), su = 0.006 + r() * 0.012, st = 0.03 + r() * 0.05;
+      for (let i = 0; i < size; i++) {
+        const a = r() * Math.PI * 2, d = Math.sqrt(r());
+        pts.push({ u: Math.min(0.98, Math.max(0.02, cu + Math.cos(a) * d * su)), t: Math.min(0.985, Math.max(-0.985, ct + Math.sin(a) * d * st)) });
+      }
     }
     const intake = y.findings.find((f) => f.kind === 'intake');
     if (intake) for (let i = 0; i < 26; i++) pts.push({ u: intake.u + (r() - 0.5) * 0.03, t: intake.t + (r() - 0.5) * 0.08 });
@@ -184,7 +239,7 @@ export class FoulingSystem {
       p.setX(i, vx * k); p.setZ(i, vz * k);
     }
     geo.computeVertexNormals();
-    const mat = addCaustics(new THREE.MeshStandardMaterial({ color: '#D8D0BC', roughness: 0.92, metalness: 0 }), 0.35);
+    const mat = addCaustics(new THREE.MeshStandardMaterial({ color: '#D8D0BC', roughness: 0.92, metalness: 0 }), 0.1);
     const mesh = new THREE.InstancedMesh(geo, mat, pts.length);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
@@ -192,11 +247,11 @@ export class FoulingSystem {
     pts.forEach((pt, i) => {
       const pos = s.under(pt.u, pt.t);
       const n = s.underNormal(pt.u, pt.t);
-      const sc = 0.011 + r() * 0.017;
+      const sc = 0.008 + r() * r() * 0.02;
       q.setFromUnitVectors(up, n);
       m.compose(pos.clone().addScaledVector(n, -0.002), q, new THREE.Vector3(sc, sc * (0.8 + r() * 0.6), sc));
       mesh.setMatrixAt(i, m);
-      col.setHSL(0.11 + r() * 0.04, 0.12 + r() * 0.12, 0.62 + r() * 0.18);
+      if (r() < 0.45) col.setHSL(0.17 + r() * 0.06, 0.22 + r() * 0.12, 0.34 + r() * 0.12); else col.setHSL(0.1 + r() * 0.04, 0.1 + r() * 0.1, 0.5 + r() * 0.16);
       mesh.setColorAt(i, col);
       const b: Barnacle = { u: pt.u, t: pt.t, hp: 1, alive: true, idx: i, pos, normal: n, scale: sc };
       this.barnacles.push(b);
@@ -286,8 +341,10 @@ export class FoulingSystem {
     return { popped, barnaclesHere: near.length };
   }
 
+  private lastFlush = 0;
   flush() {
-    if (this.dirty) { this.texture.needsUpdate = true; this.dirty = false; }
+    const now = performance.now();
+    if (this.dirty && now - this.lastFlush > 60) { this.texture.needsUpdate = true; this.dirty = false; this.lastFlush = now; }
   }
 
   /** Show the hull as it looked at the previous scan (for before / after photos). */

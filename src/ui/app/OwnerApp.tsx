@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
-  Activity, History, Anchor, BookOpen, ChevronRight, X, RotateCcw, Ruler, Shell, Timer, Trash2, CheckCircle2, Clock, Wrench,
+  Activity, History, Anchor, BookOpen, ChevronRight, X, RotateCcw, Ruler, Timer, Trash2, CheckCircle2, Clock, Wrench,
   Waves, Link2, LifeBuoy, AlertTriangle, CloudLightning, Share2, Gauge, CalendarDays, MapPin, Sparkles,
 } from 'lucide-react';
 import '@fontsource/source-serif-4/500.css';
@@ -39,10 +39,11 @@ function Ring({ value }: { value: number }) {
   );
 }
 
-function LargeTitle({ eyebrow, title, sub, right }: { eyebrow?: string; title: string; sub?: string; right?: React.ReactNode }) {
+function LargeTitle({ eyebrow, title, sub, right, logo }: { eyebrow?: string; title: string; sub?: string; right?: React.ReactNode; logo?: boolean }) {
   return (
     <header className="lt">
-      <div className="lt-row">{eyebrow ? <span className="lt-eyebrow">{eyebrow}</span> : <span />}{right}</div>
+      <div className="lt-row">{logo ? <img className="lt-logo" src="/logo-h-navy.png" alt="UNDERSEEN" /> : eyebrow ? <span className="lt-eyebrow">{eyebrow}</span> : <span />}{right}</div>
+      {logo && eyebrow && <span className="lt-eyebrow lt-eyebrow-under">{eyebrow}</span>}
       <h1 className="lt-title">{title}</h1>
       {sub && <p className="lt-sub">{sub}</p>}
     </header>
@@ -83,6 +84,7 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
         {tab === 'report' && (
           <>
             <LargeTitle
+              logo
               eyebrow={today()}
               title={`MY ${y.name}`}
               sub={`${y.owner}'s ${y.lengthFt} ft ${y.style} · Berth ${y.berth}`}
@@ -108,8 +110,8 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
               </section>
 
               <div className="tiles">
-                <div className="tile"><span className="tile-k"><Ruler style={{ color: '#0B7F84' }} />Cleaned</span><b>{Math.round(stats.areaM2)}<small> m²</small></b></div>
-                <div className="tile"><span className="tile-k"><Shell style={{ color: '#C77A2E' }} />Barnacles</span><b>{stats.removed}<small> removed</small></b></div>
+                <div className="tile"><span className="tile-k"><Ruler style={{ color: '#0B7F84' }} />Cleaned</span><b>{Math.round(stats.areaM2)}<small> of {Math.round(stats.totalM2)} m²</small></b></div>
+                <div className="tile"><span className="tile-k"><CalendarDays style={{ color: '#C77A2E' }} />Next dive</span><b>28<small> days</small></b></div>
                 <div className="tile"><span className="tile-k"><Trash2 style={{ color: '#5B7F3A' }} />In the filter</span><b>{stats.debrisKg.toFixed(1)}<small> kg est.</small></b></div>
                 <div className="tile"><span className="tile-k"><Timer style={{ color: '#5A5FD6' }} />On the hull</span><b>{fmt(stats.seconds)}<small> min</small></b></div>
               </div>
@@ -154,7 +156,7 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
                 </div>
                 <div className="row">
                   <span className="row-icon" style={{ background: '#E6F4F4', color: '#0B7F84' }}><CalendarDays /></span>
-                  <span className="row-main"><b>Next dive</b><span>{new Date(Date.now() + 28 * 864e5).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</span></span>
+                  <span className="row-main"><b>Next dive and scan</b><span>{new Date(Date.now() + 28 * 864e5).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</span></span>
                 </div>
               </div>
               <p className="credits">Photos: {[hero.credit, ...y.findings.map((f) => FINDING_PHOTOS[f.kind].credit), DIVER_PHOTO.credit].filter((v, i, a) => a.indexOf(v) === i).join(' · ')}</p>
@@ -308,7 +310,7 @@ function TimeLapse({ y, plans, levels }: { y: Yacht; plans: string[]; levels: Ap
             <line x1="0" x2={W} y1={B} y2={B} stroke="#E2DFD8" />
             {levels.growth.map((g, k) => {
               const h = Math.max(4, g * (B - T));
-              return <rect key={k} x={xs(k) - 8} y={B - h} width="16" height={h} rx="5" fill={k === i ? '#0A2233' : '#9DCFD2'} />;
+              return <rect key={k} x={xs(k) - 8} y={B - h} width="16" height={h} fill={k === i ? '#0A2233' : '#9DCFD2'} />;
             })}
             {levels.months.map((m, k) => <text key={k} x={xs(k)} y={H - 3} textAnchor="middle" className={k === i ? 'on' : ''}>{m}</text>)}
           </svg>
@@ -355,21 +357,21 @@ function Berth({ y, notify }: { y: Yacht; notify: (t: string, b: string) => void
         </div>
         <section className="card pad-s">
           <svg className="marina" viewBox="0 0 340 236" role="img" aria-label={`Map of pontoon ${y.pontoon}`}>
-            <rect x="0" y="0" width="340" height="236" rx="14" fill="#EAF3F4" />
+            <rect x="0" y="0" width="340" height="236" fill="#EAF3F4" />
             {Array.from({ length: 6 }, (_, k) => <path key={k} d={`M0 ${150 + k * 15} Q 85 ${144 + k * 15} 170 ${150 + k * 15} T 340 ${150 + k * 15}`} fill="none" stroke="rgba(11,127,132,.08)" />)}
-            <rect x="14" y="30" width="312" height="16" rx="4" fill="#D9CFC0" />
+            <rect x="14" y="30" width="312" height="16" fill="#D9CFC0" />
             <text x="16" y="22" fontSize="10.5" fontWeight="700" fill="#8E8A82" letterSpacing="1">PONTOON {y.pontoon}</text>
             {berths.map((b, k) => {
               const x = 34 + k * 44, me = b === my;
               return (
                 <g key={b}>
-                  <rect x={x - 2} y="46" width="4" height="76" rx="1" fill="#C9C1B4" />
+                  <rect x={x - 2} y="46" width="4" height="76" fill="#C9C1B4" />
                   {k < berths.length - 1 && (
                     <>
                       <path d={`M${x + 22} 56 l -13 0 q -7 24 0 56 l 13 7 l 13 -7 q 7 -32 0 -56 z`} fill={me ? '#0B7F84' : '#FFFFFF'} stroke={me ? '#0B7F84' : '#D8D4CC'} strokeWidth="1.2" />
                       <text x={x + 22} y="142" textAnchor="middle" fontSize={me ? 11.5 : 10} fontWeight={me ? 700 : 500} fill={me ? '#0B7F84' : '#9A968E'}>{y.pontoon}-{String(b).padStart(2, '0')}</text>
                       <path d={`M${x + 22} 121 Q ${x + 31} 170 ${x + 25} 204`} fill="none" stroke={me ? '#0B7F84' : '#CFCAC1'} strokeDasharray="2 4" strokeWidth="1.5" />
-                      <rect x={x + 17} y="204" width="16" height="8" rx="2" fill={me ? '#0B7F84' : '#CFCAC1'} />
+                      <rect x={x + 17} y="204" width="16" height="8" fill={me ? '#0B7F84' : '#CFCAC1'} />
                     </>
                   )}
                 </g>

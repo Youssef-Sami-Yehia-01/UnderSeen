@@ -115,14 +115,14 @@ export function makeWater() {
           // seen from below: bright Snell's window above, dark mirror outside it
           vec3 nn = -n;
           float cosT = clamp(dot(-V, vec3(0.0,1.0,0.0)), 0.0, 1.0);
-          float window = smoothstep(0.62, 0.78, cosT);
+          float window = smoothstep(0.66, 0.82, cosT);
           float ripple = noise(p*1.4 + vec2(uTime*0.4, uTime*0.3))*0.5+0.5;
-          vec3 inside = mix(vec3(0.30, 0.60, 0.66), vec3(0.62, 0.84, 0.86), ripple*0.7);
+          vec3 inside = mix(vec3(0.08, 0.40, 0.48), vec3(0.24, 0.62, 0.68), ripple*0.7);
           inside += vec3(1.0, 0.9, 0.7) * pow(max(dot(normalize(reflect(V, nn)), uSun), 0.0), 40.0) * 0.6;
-          vec3 outside = vec3(0.04, 0.22, 0.28) + ripple*0.05;
+          vec3 outside = vec3(0.03, 0.24, 0.31) + ripple*0.04;
           vec3 c = mix(outside, inside, window);
-          float fogk = 1.0 - exp(-dist * 0.07);
-          c = mix(c, vec3(0.04, 0.27, 0.34), fogk*0.85);
+          float fogk = 1.0 - exp(-dist * 0.11);
+          c = mix(c, vec3(0.03, 0.24, 0.31), fogk*0.92);
           gl_FragColor = vec4(c, 1.0);
           #include <colorspace_fragment>
           return;
@@ -285,7 +285,7 @@ export function makeMarineSnow() {
 export function makePontoon(atX: number) {
   const g = new THREE.Group();
   const deckMat = new THREE.MeshStandardMaterial({ color: '#B49A78', roughness: 0.75 });
-  const floatMat = addCaustics(new THREE.MeshStandardMaterial({ color: '#7F8A8F', roughness: 0.8 }), 0.35);
+  const floatMat = addCaustics(new THREE.MeshStandardMaterial({ color: '#4E585D', roughness: 0.85 }), 0.25);
   const pileMat = addCaustics(new THREE.MeshStandardMaterial({ color: '#6B7378', roughness: 0.7, metalness: 0.2 }), 0.35);
   const deck = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.18, 70), deckMat);
   deck.position.set(atX, 0.42, 0);

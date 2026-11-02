@@ -39,6 +39,8 @@ export interface Events {
   stats: (s: CleanStats) => void;
   scan: (k: number) => void;
   labels: (l: Label[]) => void;
+  /** timelapse replay progress (0..1) while it runs; active=false when it ends */
+  timelapse?: (k: number, active: boolean) => void;
 }
 
 const isTouch = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
@@ -138,6 +140,12 @@ export class Experience {
   shots: Record<string, { now: string; before: string }> = {};
   heroImage = '';
   timeScale = 1;
+  /** visitor's speed-up while cleaning (1x, 2x, 4x, 8x) */
+  speed = 1;
+  private simT = 0;
+  private lastRec = -1;
+  private path: { T: number; u: number; t: number; h: THREE.Vector3; tool: Tool | null }[] = [];
+  private tl: { start: number; dur: number; total: number; i: number; heading: THREE.Vector3 } | null = null;
   private used = false;
   private frameNo = 0;
   private covTex: THREE.DataTexture | null = null;
@@ -251,6 +259,8 @@ export class Experience {
 
   /* ----------------------------------------------------------------- */
   setYacht(y: Yacht, landing = false) {
+    this.tl = null;
+    this.path = []; this.simT = 0; this.lastRec = -1;
     if (this.parts) {
       this.scene.remove(this.parts.group);
       this.parts.dispose();
@@ -541,6 +551,7 @@ export class Experience {
         this.phase = 'clean';
         this.camMode = 'follow';
         this.cleanStart = this.clock.elapsedTime;
+        this.simT = 0; this.lastRec = -1; this.path = [];
         // the robot's cameras scan the hull while it cleans
         const u = this.scan.mat.uniforms;
         this.scan.points.visible = true;
@@ -558,7 +569,7 @@ export class Experience {
     this.autopilot = false;
     this.target = null;
     this.controls.enabled = false;
-    this.cleanSeconds = this.clock.elapsedTime - this.cleanStart;
+    this.cleanSeconds = this.simT;
     sound.setLoops({ brush: 0, jet: 0 });
     const { L, B, D } = this.shape;
     // one last pass along the keel fills any gaps the cleaning rows left in the scan
@@ -607,6 +618,64 @@ export class Experience {
     };
   }
 
+  setSpeed(n: number) { this.speed = n; }
+
+  /** Replay the whole dive fast: the hull dirty again, the robot retracing its route, the scan building up behind it. */
+  playTimelapse() {
+    if (this.phase !== 'result' || this.tl || this.seq || !this.path.length) return;
+    const total = Math.max(this.cleanSeconds, this.path[this.path.length - 1].T);
+    const dur = THREE.MathUtils.clamp(total / 18, 8, 16);
+    const { skin, cov } = this.fouling.replayStart();
+    this.parts.underMat.map = skin;
+    this.parts.underMat.needsUpdate = true;
+    const u = this.scan.mat.uniforms;
+    u.uCov.value = cov; u.uSweep.value = -100; u.uShowFind.value = 0; u.uLive.value = 1;
+    this.findingMarkers.forEach((m) => { m.visible = false; });
+    this.robot.group.visible = true;
+    this.robot.tether.visible = true;
+    this.controls.autoRotateSpeed = 0.9;
+    this.tl = { start: this.clock.elapsedTime, dur, total, i: 0, heading: new THREE.Vector3(1, 0, 0) };
+    this.ev.timelapse?.(0, true);
+  }
+
+  private stepTimelapse(t: number, raw: number) {
+    const tl = this.tl!;
+    const k = Math.min(1, (t - tl.start) / tl.dur);
+    const T = k * tl.total;
+    this.fouling.replayTo(T);
+    while (tl.i < this.path.length - 1 && this.path[tl.i + 1].T <= T) tl.i++;
+    const a = this.path[tl.i], b = this.path[Math.min(this.path.length - 1, tl.i + 1)];
+    const f = b.T > a.T ? THREE.MathUtils.clamp((T - a.T) / (b.T - a.T), 0, 1) : 0;
+    tl.heading.copy(a.h).lerp(b.h, f).normalize();
+    this.robot.placeOnHull(this.shape, THREE.MathUtils.lerp(a.u, b.u, f), THREE.MathUtils.lerp(a.t, b.t, f), tl.heading);
+    this.robot.animate(raw, a.tool === 'brush', a.tool === 'jet');
+    (this.scan.mat.uniforms.uRobot.value as THREE.Vector3).copy(this.robot.group.position);
+    this.ev.timelapse?.(k, true);
+    if (k >= 1) this.stopTimelapse();
+  }
+
+  /** End (or skip) the replay: back to the finished hull, a quick last pass, findings shown again. */
+  stopTimelapse() {
+    if (!this.tl) return;
+    this.tl = null;
+    this.fouling.replayEnd();
+    this.parts.underMat.map = this.fouling.texture;
+    this.parts.underMat.needsUpdate = true;
+    const u = this.scan.mat.uniforms;
+    u.uCov.value = this.covTex; u.uLive.value = 0;
+    this.controls.autoRotateSpeed = 0.5;
+    const L = this.shape.L;
+    this.seq = {
+      start: this.clock.elapsedTime, dur: 1.6,
+      update: (k) => { u.uSweep.value = (k * 1.04 - 0.5) * L; },
+      done: () => {
+        u.uShowFind.value = 1;
+        this.findingMarkers.forEach((m) => { m.visible = true; });
+        this.ev.timelapse?.(1, false);
+      },
+    };
+  }
+
   findingWorld(f: Finding) {
     if (f.kind === 'propeller' || f.kind === 'rope') {
       const idx = f.side === 'port' ? 0 : 1;
@@ -639,7 +708,7 @@ export class Experience {
       removed: f.removed,
       activeTool: this.activeTool,
       brushOnBarnacles: this.brushOnBarnacles,
-      seconds: this.phase === 'clean' ? this.clock.elapsedTime - this.cleanStart : this.cleanSeconds,
+      seconds: this.phase === 'clean' ? this.simT : this.cleanSeconds,
       areaM2: area * cov,
       totalM2: area,
       debrisKg: area * cov * (this.yacht.fouling === 'heavy' ? 0.55 : this.yacht.fouling === 'medium' ? 0.3 : 0.12) + f.removed * 0.004,
@@ -773,6 +842,8 @@ export class Experience {
   private stepClean(dt: number) {
     const s = this.shape;
     const r = this.robot;
+    this.simT += dt;
+    this.fouling.clock = this.simT;
     if (this.autopilot) {
       const wp = this.autoPath[this.autoI];
       if (wp) this.target = wp;
@@ -836,6 +907,8 @@ export class Experience {
     this.activeTool = tool;
     this.brushOnBarnacles = working && cur.tool === 'brush' && cur.near > 0;
     r.placeOnHull(s, r.u, r.t, this.heading);
+    // log the route for the timelapse
+    if (this.simT - this.lastRec >= 0.12) { this.lastRec = this.simT; this.path.push({ T: this.simT, u: r.u, t: r.t, h: this.heading.clone(), tool: this.activeTool }); }
     r.animate(dt, this.activeTool === 'brush', this.activeTool === 'jet');
     sound.setLoops({ brush: this.activeTool === 'brush' ? 1 : 0, jet: this.activeTool === 'jet' ? 1 : 0 });
     this.fouling.flush();
@@ -902,6 +975,7 @@ export class Experience {
 
   private emitLabels() {
     if (!this.findingMarkers.length) return;
+    if (this.tl) { this.ev.labels([]); return; }
     const w = this.renderer.domElement.clientWidth, h = this.renderer.domElement.clientHeight;
     const out: Label[] = this.findingMarkers.map((m) => {
       const p = m.getWorldPosition(new THREE.Vector3()).project(this.camera);
@@ -912,7 +986,8 @@ export class Experience {
 
   private loop = () => {
     this.raf = requestAnimationFrame(this.loop);
-    const dt = Math.min(0.05, this.clock.getDelta()) * this.timeScale;
+    const raw = Math.min(0.05, this.clock.getDelta());
+    const dt = raw * this.timeScale * (this.phase === 'clean' ? this.speed : 1);
     const t = this.clock.elapsedTime;
     causticUniforms.uTime.value = t;
     this.scan.mat.uniforms.uTime.value = t;
@@ -926,6 +1001,7 @@ export class Experience {
     } else if (this.phase === 'clean') {
       this.stepClean(dt);
     } else if (this.controls.enabled) {
+      if (this.tl) this.stepTimelapse(t, raw);
       this.controls.update();
       if ((this.phase === 'result') && this.camera.position.y > -0.35) this.camera.position.y = -0.35;
       if ((this.phase === 'landing' || this.phase === 'intro') && this.camera.position.y < 0.8) this.camera.position.y = 0.8;
@@ -959,7 +1035,7 @@ export class Experience {
     else this.renderer.render(this.scene, this.camera);
 
     // adaptive quality
-    if (dt > 0.034) this.slowFrames++; else this.slowFrames = Math.max(0, this.slowFrames - 1);
+    if (raw > 0.034) this.slowFrames++; else this.slowFrames = Math.max(0, this.slowFrames - 1);
     if (this.slowFrames > 90 && this.quality > 0) {
       this.quality--;
       this.slowFrames = 0;

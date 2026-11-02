@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Volume2, VolumeX, ArrowRight, Hand, Sparkles, Paintbrush, Waves, Bot, Eye, Crosshair, Plus, Minus, Info, AlertTriangle, RotateCcw,
+  Volume2, VolumeX, ArrowRight, Hand, Sparkles, Paintbrush, Waves, Bot, Eye, Crosshair, Plus, Minus, Info, AlertTriangle, RotateCcw, Film, SkipForward,
 } from 'lucide-react';
 import { Experience, type Phase, type CleanStats, type Label, type ToolMode } from '../three/Experience';
 import { makeYacht, healthScore, SEVERITY_LABEL, type Yacht } from '../lib/yacht';
@@ -78,6 +78,10 @@ export default function Sim() {
   const [tool, setTool] = useState<ToolMode>('auto');
   const [cam, setCam] = useState<'follow' | 'overview'>('follow');
   const [auto, setAuto] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const [tl, setTl] = useState<{ k: number; active: boolean }>({ k: 0, active: false });
+  const SPEEDS = [1, 2, 4, 8];
+  const cycleSpeed = () => { const n = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]; setSpeed(n); exp.current?.setSpeed(n); };
   const [muted, setMutedState] = useState(false);
   const [appData, setAppData] = useState<AppData | null>(null);
   const [now, setNow] = useState(new Date());
@@ -98,6 +102,7 @@ export default function Sim() {
       stats: (s) => setStats(s),
       scan: (k) => setScanK(k),
       labels: (l) => setLabels(l),
+      timelapse: (k, active) => setTl({ k, active }),
     }, initial);
     exp.current = e;
     if (new URLSearchParams(location.search).has('debug')) (window as unknown as { __us: Experience }).__us = e;
@@ -130,6 +135,7 @@ export default function Sim() {
   };
 
   const startDive = () => {
+    setSpeed(1); exp.current?.setSpeed(1);
     sound.unlockAudio();
     exp.current?.startDive();
   };
@@ -174,6 +180,8 @@ export default function Sim() {
 
   const restart = () => {
     setPhase('landing');
+    setTl({ k: 0, active: false });
+    setSpeed(1);
     setYacht(null);
     setAppData(null);
     setStats(null);
@@ -219,7 +227,7 @@ export default function Sim() {
       {/* top bar */}
       <div className="topbar">
         {phase === 'clean' || phase === 'dive' || phase === 'scan' || phase === 'result' ? (
-          <span className="live"><i />{phase === 'scan' ? '3D SCAN' : 'LIVE · ROBOT CAM'}<span className="sep" />{fmtTime(st?.seconds ?? 0)}</span>
+          <span className="live"><i />{tl.active ? 'TIMELAPSE' : phase === 'scan' ? '3D SCAN' : 'LIVE · ROBOT CAM'}<span className="sep" />{fmtTime(st?.seconds ?? 0)}{phase === 'clean' && speed > 1 && <><span className="sep" />{speed}×</>}</span>
         ) : phase === 'intro' ? (
           <div className="brand"><img src="/logo-h-white.png" alt="UNDERSEEN" /></div>
         ) : <span />}
@@ -283,6 +291,7 @@ export default function Sim() {
             <button className="iconbtn" aria-pressed={cam === 'overview'} onClick={() => { setCam('overview'); exp.current?.setCamMode('overview'); }} aria-label="See the whole hull"><Eye /></button>
             <button className="iconbtn" onClick={() => exp.current?.zoom(-0.5)} aria-label="Zoom in"><Plus /></button>
             <button className="iconbtn" onClick={() => exp.current?.zoom(0.5)} aria-label="Zoom out"><Minus /></button>
+            <button className={`iconbtn speed${speed > 1 ? ' on' : ''}`} onClick={cycleSpeed} aria-label={`Speed ${speed} times, tap to change`}>{speed}×</button>
           </div>
           <div className="hud-panel glass">
             <div className="hud-head"><h2>Clean the hull</h2><span>{y ? `MY ${y.name}` : ''}</span></div>
@@ -317,6 +326,14 @@ export default function Sim() {
             if (!f) return null;
             return <div key={l.id} className="tag" style={{ left: l.x, top: l.y, opacity: l.visible ? 1 : 0 }}>{f.title}<small>{SEVERITY_LABEL[f.severity]}</small></div>;
           })}
+          {tl.active ? (
+            <div className="scan-card glass tl-card">
+              <h2>Timelapse</h2>
+              <p>{fmtTime((st?.seconds ?? 0) * tl.k)} of {fmtTime(st?.seconds ?? 0)} on the hull · the scan builds up where the robot has cleaned</p>
+              <div className="bar"><i style={{ width: `${Math.round(tl.k * 100)}%` }} /></div>
+              <button className="btn btn-ghost tl-skip" onClick={() => exp.current?.stopTimelapse()}><SkipForward />Skip</button>
+            </div>
+          ) : (
           <div className="dock glass">
             <div className="eyebrow">Scan {y.scanNo} complete</div>
             <h1 className="h-lg">{y.findings.length} new {y.findings.length === 1 ? 'finding' : 'findings'}</h1>
@@ -324,9 +341,13 @@ export default function Sim() {
               {y.findings.map((f) => <div className="result-item" key={f.id}><i />{f.title}<span>{f.where}</span></div>)}
               <div className="result-item"><i style={{ background: y.anodePct < 40 ? 'var(--coral)' : 'var(--amber)' }} />Anodes at {y.anodePct}%<span>Plan a replacement</span></div>
             </div>
-            <button className="btn btn-primary" onClick={sendReport}>Send the report to my phone <ArrowRight /></button>
+            <div className="result-actions">
+              <button className="btn btn-ghost" onClick={() => exp.current?.playTimelapse()}><Film />Watch the timelapse</button>
+              <button className="btn btn-primary" onClick={sendReport}>Send the report to my phone <ArrowRight /></button>
+            </div>
             <p className="fineprint">Drag to look around the scan. Coral marks what changed since the last scan.</p>
           </div>
+          )}
         </>
       )}
 

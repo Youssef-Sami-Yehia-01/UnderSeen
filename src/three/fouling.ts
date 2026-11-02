@@ -30,7 +30,7 @@ function makeNoise(seed: number) {
 const hex = (h: string) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 export type Tool = 'brush' | 'jet';
 
-export interface Barnacle { u: number; t: number; hp: number; alive: boolean; idx: number; pos: THREE.Vector3; normal: THREE.Vector3; scale: number }
+export interface Barnacle { u: number; t: number; hp: number; alive: boolean; idx: number; pos: THREE.Vector3; normal: THREE.Vector3; scale: number; poppedAt: number }
 
 const toPx = (u: number, t: number): [number, number] => [u * SKIN_W, ((t + 1) / 2) * SKIN_H];
 
@@ -101,6 +101,12 @@ export class FoulingSystem {
   removed = 0;
   private buckets = new Map<number, Barnacle[]>();
   private dirty = false;
+  /** robot time (s) set by the simulation, used to log when each cell and barnacle was cleaned */
+  clock = 0;
+  cleanedAt: Float32Array;
+  /** the hull as it was before this dive, for the timelapse replay */
+  dirtySkin: HTMLCanvasElement;
+  private baseMatrices: Float32Array;
 
   constructor(y: Yacht, shape: HullShape) {
     this.yacht = y;
@@ -122,7 +128,11 @@ export class FoulingSystem {
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.anisotropy = 8;
     this.cleaned = new Uint8Array(this.cellsU * this.cellsT);
+    this.cleanedAt = new Float32Array(this.cellsU * this.cellsT).fill(-1);
+    this.dirtySkin = mk();
+    this.dirtySkin.getContext('2d')!.drawImage(this.skin, 0, 0);
     this.mesh = this.makeBarnacles();
+    this.baseMatrices = new Float32Array(this.mesh.instanceMatrix.array as Float32Array);
   }
 
   private paintBase(x: CanvasRenderingContext2D) {
@@ -255,7 +265,7 @@ export class FoulingSystem {
       mesh.setMatrixAt(i, m);
       if (r() < 0.45) col.setHSL(0.17 + r() * 0.06, 0.22 + r() * 0.12, 0.34 + r() * 0.12); else col.setHSL(0.1 + r() * 0.04, 0.1 + r() * 0.1, 0.5 + r() * 0.16);
       mesh.setColorAt(i, col);
-      const b: Barnacle = { u: pt.u, t: pt.t, hp: 1, alive: true, idx: i, pos, normal: n, scale: sc };
+      const b: Barnacle = { u: pt.u, t: pt.t, hp: 1, alive: true, idx: i, pos, normal: n, scale: sc, poppedAt: -1 };
       this.barnacles.push(b);
       const key = this.bucketKey(pt.u, pt.t);
       if (!this.buckets.has(key)) this.buckets.set(key, []);
@@ -318,7 +328,7 @@ export class FoulingSystem {
     for (let i = cu0; i <= cu1; i++) for (let j = ct0; j <= ct1; j++) {
       const cx = ((i + 0.5) / this.cellsU) * SKIN_W, cy = ((j + 0.5) / this.cellsT) * SKIN_H;
       const k = j * this.cellsU + i;
-      if (!this.cleaned[k] && ((cx - px) / rx) ** 2 + ((cy - py) / ry) ** 2 <= 1) { this.cleaned[k] = 1; this.cleanedCount++; }
+      if (!this.cleaned[k] && ((cx - px) / rx) ** 2 + ((cy - py) / ry) ** 2 <= 1) { this.cleaned[k] = 1; this.cleanedAt[k] = this.clock; this.cleanedCount++; }
     }
     // barnacles
     const popped: Barnacle[] = [];
@@ -329,6 +339,7 @@ export class FoulingSystem {
       b.hp -= dmg;
       if (b.hp <= 0) {
         b.alive = false;
+        b.poppedAt = this.clock;
         this.removed++;
         m.makeScale(0, 0, 0);
         this.mesh.setMatrixAt(b.idx, m);
@@ -341,6 +352,67 @@ export class FoulingSystem {
     }
     if (popped.length) this.mesh.instanceMatrix.needsUpdate = true;
     return { popped, barnaclesHere: near.length };
+  }
+
+  /* ---------------- timelapse replay ---------------- */
+  private replay: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; order: number[]; next: number; cov: Uint8Array; covTex: THREE.DataTexture; dirty: boolean; last: number } | null = null;
+
+  /** Start a replay: the hull back as it was, nothing scanned. Returns the coverage texture to show. */
+  replayStart() {
+    const c = document.createElement('canvas');
+    c.width = SKIN_W; c.height = SKIN_H;
+    const ctx = c.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(this.dirtySkin, 0, 0);
+    const tex = new THREE.CanvasTexture(c);
+    tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+    const order = [...this.cleanedAt.keys()].filter((k) => this.cleanedAt[k] >= 0).sort((a, b) => this.cleanedAt[a] - this.cleanedAt[b]);
+    const cov = new Uint8Array(this.cleaned.length);
+    const covTex = new THREE.DataTexture(cov, this.cellsU, this.cellsT, THREE.RedFormat, THREE.UnsignedByteType);
+    covTex.needsUpdate = true;
+    this.replay = { canvas: c, ctx, tex, order, next: 0, cov, covTex, dirty: false, last: 0 };
+    // every barnacle back on the hull
+    (this.mesh.instanceMatrix.array as Float32Array).set(this.baseMatrices);
+    this.mesh.instanceMatrix.needsUpdate = true;
+    return { skin: tex, cov: covTex };
+  }
+
+  /** Advance the replay to robot time T: clean and scan every cell the robot had reached by then. */
+  replayTo(T: number) {
+    const R = this.replay;
+    if (!R) return;
+    const cw = SKIN_W / this.cellsU, ch = SKIN_H / this.cellsT;
+    let changed = false;
+    while (R.next < R.order.length && this.cleanedAt[R.order[R.next]] <= T) {
+      const k = R.order[R.next++];
+      const i = k % this.cellsU, j = Math.floor(k / this.cellsU);
+      R.ctx.drawImage(this.skin, i * cw, j * ch, cw, ch, i * cw, j * ch, cw, ch);
+      R.cov[k] = 1;
+      changed = true;
+    }
+    if (changed) { R.covTex.needsUpdate = true; R.dirty = true; }
+    const now = performance.now();
+    if (R.dirty && now - R.last > 60) { R.tex.needsUpdate = true; R.dirty = false; R.last = now; }
+    const m = new THREE.Matrix4();
+    let popped = false;
+    for (const b of this.barnacles) {
+      if (b.poppedAt >= 0 && b.poppedAt <= T) {
+        m.fromArray(this.mesh.instanceMatrix.array, b.idx * 16);
+        if (m.elements[0] !== 0 || m.elements[5] !== 0) { this.mesh.setMatrixAt(b.idx, m.makeScale(0, 0, 0)); popped = true; }
+      }
+    }
+    if (popped) this.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /** End the replay and put the real, cleaned hull back. */
+  replayEnd() {
+    const R = this.replay;
+    if (!R) return;
+    R.tex.dispose(); R.covTex.dispose();
+    this.replay = null;
+    const m = new THREE.Matrix4().makeScale(0, 0, 0);
+    (this.mesh.instanceMatrix.array as Float32Array).set(this.baseMatrices);
+    for (const b of this.barnacles) if (!b.alive) this.mesh.setMatrixAt(b.idx, m);
+    this.mesh.instanceMatrix.needsUpdate = true;
   }
 
   private lastFlush = 0;

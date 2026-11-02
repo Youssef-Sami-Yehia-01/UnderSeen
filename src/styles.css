@@ -37,6 +37,7 @@ input { font: inherit; }
 .layer > * { pointer-events: auto; }
 
 /* ---------- top bar ---------- */
+.scrim-top { position: fixed; left: 0; right: 0; top: 0; height: calc(120px + var(--sat)); background: linear-gradient(180deg, rgba(4,18,27,.5), rgba(4,18,27,0)); pointer-events: none; z-index: 4; }
 .topbar { position: fixed; top: calc(14px + var(--sat)); left: calc(18px + var(--sal)); right: calc(18px + var(--sar)); display: flex; align-items: center; justify-content: space-between; pointer-events: none; z-index: 5; }
 .topbar > * { pointer-events: auto; }
 .brand { display: flex; align-items: center; gap: 10px; }
@@ -74,7 +75,8 @@ input { font: inherit; }
 .specs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: rgba(255,255,255,.08); border-radius: 14px; overflow: hidden; margin: 14px 0 18px; }
 .specs div { background: rgba(6,22,33,.75); padding: 11px 12px; min-width: 0; }
 .specs small { display: block; font-size: 11.5px; color: var(--mist); margin-bottom: 3px; }
-.specs b { font-size: 14.5px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.specs b { font-size: 14.5px; font-weight: 600; font-variant-numeric: tabular-nums; display: block; line-height: 1.25; }
+@media (max-width: 420px) { .specs b { font-size: 13.5px; } .specs div { padding: 10px; } }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(255,255,255,.3); }
 .growth { display: inline-flex; align-items: center; gap: 6px; }
 .growth i { width: 8px; height: 8px; border-radius: 50%; }
@@ -87,7 +89,14 @@ input { font: inherit; }
 
 /* ---------- clean HUD ---------- */
 .hud-panel { position: fixed; left: calc(18px + var(--sal)); bottom: calc(18px + var(--sab)); width: min(430px, calc(100vw - 36px)); padding: 16px; z-index: 4; display: grid; gap: 14px; }
-@media (max-width: 640px) { .hud-panel { left: 8px; right: 8px; width: auto; bottom: calc(8px + var(--sab)); padding: 14px; gap: 12px; border-radius: 20px; } }
+@media (max-width: 640px) {
+  .hud-panel { left: 8px; right: 8px; width: auto; bottom: calc(8px + var(--sab)); padding: 13px; gap: 10px; border-radius: 20px; }
+  .hud-head h2 { font-size: 17px; }
+  .seg button { padding: 8px 4px 7px; }
+  .seg button .sub { display: none; }
+  .tip { font-size: 12.5px; min-height: 0; }
+  .actions .btn { padding: 12px 10px; font-size: 14.5px; }
+}
 .hud-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
 .hud-head h2 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
 .hud-head span { font-size: 12.5px; color: var(--mist); }

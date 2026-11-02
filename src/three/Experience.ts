@@ -84,7 +84,7 @@ export class Experience {
   fill = new THREE.DirectionalLight('#7FD0D8', 0);
   envAbove: THREE.Texture;
   envUnder: THREE.Texture;
-  fogAbove = new THREE.Fog('#E7D6C2', 350, 2600);
+  fogAbove = new THREE.Fog('#E3D3C3', 500, 3200);
   fogUnder = new THREE.FogExp2(UNDERWATER_COLOR.getHex(), 0.085);
   underwater = false;
 
@@ -605,9 +605,9 @@ export class Experience {
     const canvas = this.renderer.domElement;
     const aspect = canvas.width / canvas.height;
     const k = 1 / Math.min(1, aspect / 1.6);
-    cam.position.set((L * 1.05 + 3) * k, (L * 0.2 + 1.6) * k, (B * 0.5 + L * 0.42) * k);
-    cam.lookAt(-L * 0.05, 1.2, 0);
-    cam.fov = 30;
+    cam.fov = 28;
+    cam.position.set((L * 1.15 + 4) * k, (L * 0.3 + 2.4) * k, (B * 0.25 + L * 0.16) * k);
+    cam.lookAt(-L * 0.08, 1.0, 0);
     const img = this.grab(cam, 16 / 10, 1000);
     this.robot.group.visible = robotVis; this.robot.tether.visible = robotVis;
     this.setUnderwater(wasUnder);

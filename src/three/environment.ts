@@ -318,26 +318,33 @@ export function makePontoon(atX: number) {
 export function makeMountains() {
   const r = mulberry32(7);
   const n = vnoise(r, 64);
-  const geo = new THREE.PlaneGeometry(2400, 260, 240, 1);
-  const pos = geo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), y = pos.getY(i);
-    if (y > 0) {
-      const h = 40 + n(x * 0.004, 3) * 160 + n(x * 0.02, 7) * 45 + n(x * 0.06, 9) * 12;
-      pos.setY(i, h);
-    } else pos.setY(i, -10);
-  }
-  geo.computeVertexNormals();
-  const mat = new THREE.MeshBasicMaterial({ color: '#B98E79', fog: true });
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(-1100, 0, 0);
-  m.rotation.y = Math.PI / 2;
-  const m2 = m.clone();
-  m2.material = new THREE.MeshBasicMaterial({ color: '#C9A28D', fog: true });
-  m2.position.set(-1300, 0, 300);
-  m2.scale.set(1.2, 0.8, 1);
   const g = new THREE.Group();
-  g.add(m2, m);
+  const layers = [
+    { dist: 1500, height: 95, col: '#A98272', haze: '#D9C3B2', off: 0 },
+    { dist: 2100, height: 140, col: '#B99886', haze: '#E2CFBF', off: 37 },
+  ];
+  for (const L of layers) {
+    const geo = new THREE.PlaneGeometry(5200, 1, 360, 12);
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const colors: number[] = [];
+    const cRock = new THREE.Color(L.col), cHaze = new THREE.Color(L.haze);
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const v = pos.getY(i) + 0.5; // 0 at base, 1 at ridge
+      const ridge = 0.25 + n(x * 0.0022 + L.off, 3) * 0.75 + n(x * 0.011 + L.off, 7) * 0.22 + n(x * 0.04, 9) * 0.06;
+      const h = ridge * L.height * Math.pow(v, 0.9) - 6;
+      pos.setY(i, h);
+      pos.setZ(i, (n(x * 0.01, v * 5 + L.off) - 0.5) * 40 * v);
+      const c = cHaze.clone().lerp(cRock, Math.min(1, v * 1.2) * 0.85);
+      colors.push(c.r, c.g, c.b);
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, fog: true }));
+    m.position.set(-L.dist, 0, 0);
+    m.rotation.y = Math.PI / 2;
+    g.add(m);
+  }
   return g;
 }
 

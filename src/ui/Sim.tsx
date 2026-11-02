@@ -158,6 +158,7 @@ export default function Sim() {
       <div className="stage" ref={mount} />
 
       {/* top bar */}
+      {(phase === 'landing' || phase === 'intro') && <div className="scrim-top" />}
       <div className="topbar">
         {phase === 'clean' || phase === 'dive' || phase === 'scan' || phase === 'result' ? (
           <span className="live"><i />{phase === 'scan' ? '3D SCAN' : 'LIVE · ROBOT CAM'}<span className="sep" />{fmtTime(st?.seconds ?? 0)}</span>

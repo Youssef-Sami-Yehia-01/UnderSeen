@@ -38,7 +38,7 @@ Only the name typed in, the generated yacht name and the dive results are stored
 
 ## How it is built
 
-- React + TypeScript + Vite, three.js for the 3D, no external 3D models or images: the yacht, marina, robot, water, caustics and barnacles are all generated in code.
+- React + TypeScript + Vite, three.js for the 3D, no external 3D models: the yacht, marina, robot, water, caustics and barnacles are all generated in code.
 - `src/lib/yacht.ts` turns a name into a yacht and its findings (same name, same yacht).
 - `src/three/` holds the 3D: hull geometry, yacht model, water and underwater effects, the fouling texture the robot cleans, barnacles, the robot and the scan.
 - `src/ui/app/` is the owner app.

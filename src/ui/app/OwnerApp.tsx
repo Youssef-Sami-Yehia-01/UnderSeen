@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   Activity, History, Anchor, BookOpen, ChevronRight, X, RotateCcw, Ruler, Shell, Timer, Trash2, CheckCircle2, Clock, Wrench,
-  Waves, Link2, LifeBuoy, AlertTriangle, CalendarDays, CloudLightning, Share2,
+  Waves, Link2, LifeBuoy, AlertTriangle, CloudLightning, Share2, Gauge, CalendarDays, MapPin, Sparkles,
 } from 'lucide-react';
+import '@fontsource/source-serif-4/500.css';
+import '@fontsource/source-serif-4/600.css';
 import { healthScore, SEVERITY_LABEL, mulberry32, type Yacht, type Finding } from '../../lib/yacht';
 import type { CleanStats } from '../../three/Experience';
 import * as sound from '../../lib/sound';
@@ -11,6 +13,7 @@ import Photo from './Photo';
 import { yachtPhoto, FINDING_PHOTOS, MARINA_PHOTO, YARD_PHOTO, DIVER_PHOTO } from '../../lib/photos';
 import './app.css';
 
+export interface HullMap { img: string; pins: { id: string; x: number; y: number }[] }
 export interface AppData {
   yacht: Yacht;
   stats: CleanStats;
@@ -19,20 +22,30 @@ export interface AppData {
   levels: { growth: number[]; anode: number[]; months: string[]; events: string[] };
 }
 
-export interface HullMap { img: string; pins: { id: string; x: number; y: number }[] }
 type Tab = 'report' | 'time' | 'berth' | 'pass';
-const fmt = (s: number) => `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, '0')}s`;
+const TITLES: Record<Tab, string> = { report: 'Report', time: 'Time-lapse', berth: 'Berth', pass: 'Hull Passport' };
+const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const growthWord = (g: number) => (g > 0.8 ? 'Heavy' : g > 0.45 ? 'Medium' : 'Light');
+const today = () => new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
 function Ring({ value }: { value: number }) {
-  const r = 30, c = 2 * Math.PI * r;
-  const col = value >= 80 ? '#11A3A9' : value >= 60 ? '#E9A23B' : '#FF6B4A';
+  const r = 34, c = 2 * Math.PI * r;
+  const col = value >= 80 ? '#2E9B6A' : value >= 60 ? '#D08A12' : '#E5533A';
   return (
-    <svg className="ring" width="76" height="76" viewBox="0 0 76 76" aria-hidden="true">
-      <circle cx="38" cy="38" r={r} fill="none" stroke="#E8EEEF" strokeWidth="8" />
-      <circle cx="38" cy="38" r={r} fill="none" stroke={col} strokeWidth="8" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - value / 100)} transform="rotate(-90 38 38)" style={{ transition: 'stroke-dashoffset 1.2s ease' }} />
-      <text x="38" y="44" textAnchor="middle" fontSize="19" fontWeight="700" fill="#0b1f2c">{value}</text>
+    <svg className="ring" width="88" height="88" viewBox="0 0 88 88" aria-hidden="true">
+      <circle cx="44" cy="44" r={r} fill="none" stroke="#EDEBE6" strokeWidth="10" />
+      <circle cx="44" cy="44" r={r} fill="none" stroke={col} strokeWidth="10" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - value / 100)} transform="rotate(-90 44 44)" style={{ transition: 'stroke-dashoffset 1.2s cubic-bezier(.2,.8,.2,1)' }} />
     </svg>
+  );
+}
+
+function LargeTitle({ eyebrow, title, sub, right }: { eyebrow?: string; title: string; sub?: string; right?: React.ReactNode }) {
+  return (
+    <header className="lt">
+      <div className="lt-row">{eyebrow ? <span className="lt-eyebrow">{eyebrow}</span> : <span />}{right}</div>
+      <h1 className="lt-title">{title}</h1>
+      {sub && <p className="lt-sub">{sub}</p>}
+    </header>
   );
 }
 
@@ -43,6 +56,7 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
   const [open, setOpen] = useState<Finding | null>(null);
   const [booked, setBooked] = useState<Record<string, string>>({});
   const [toast, setToast] = useState<{ title: string; body: string } | null>(null);
+  const [scrolled, setScrolled] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const score = healthScore(y);
   const toastT = useRef(0);
@@ -54,80 +68,96 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
     toastT.current = window.setTimeout(() => setToast(null), 3800);
   }, []);
 
-  const go = (t: Tab) => { setTab(t); scroller.current?.scrollTo({ top: 0 }); };
+  const go = (t: Tab) => setTab(t);
+  useLayoutEffect(() => {
+    if (scroller.current) scroller.current.scrollTop = 0;
+    setScrolled(false);
+  }, [tab]);
+  const navTitle = tab === 'report' ? `MY ${y.name}` : TITLES[tab];
+  const issues = y.findings.length;
 
   return (
     <div className="oa">
-      <div className="oa-scroll" ref={scroller}>
+      <div className={`oa-nav${scrolled ? ' on' : ''}`} aria-hidden={!scrolled}><span>{navTitle}</span></div>
+      <div className="oa-scroll" ref={scroller} onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 64)}>
         {tab === 'report' && (
           <>
-            <header className="oa-hero">
-              <Photo p={hero} className="oa-hero-bg" credit={false} />
-              <span className="oa-hero-credit">{hero.credit}</span>
-              <div className="oa-hero-top">
-                <img className="oa-logo" src="/logo-white.png" alt="UNDERSEEN" />
-                <button className="oa-round" onClick={onRestart} aria-label="Try another name"><RotateCcw /></button>
-              </div>
-              <div className="oa-hero-bottom">
-                <small>{y.owner}'s yacht</small>
-                <h1>MY {y.name}</h1>
-                <span>{y.lengthFt} ft {y.style} · Berth {y.berth} · Hurghada</span>
-              </div>
-            </header>
+            <LargeTitle
+              eyebrow={today()}
+              title={`MY ${y.name}`}
+              sub={`${y.owner}'s ${y.lengthFt} ft ${y.style} · Berth ${y.berth}`}
+              right={<button className="lt-btn" onClick={onRestart} aria-label="Try another name"><RotateCcw /></button>}
+            />
             <div className="oa-body">
-              <div className="oa-card oa-health">
-                <Ring value={score} />
-                <div>
-                  <small>Hull condition</small>
-                  <b>{score >= 80 ? 'Good' : score >= 60 ? 'Needs attention' : 'Act soon'}</b>
-                  <span>Scan {y.scanNo} · today · {y.findings.length} new {y.findings.length === 1 ? 'finding' : 'findings'}</span>
+              <div className="hero">
+                <Photo p={hero} className="hero-photo" credit={false} />
+                <span className="hero-badge"><i />Scan {y.scanNo} complete</span>
+                <span className="hero-credit">{hero.credit}</span>
+              </div>
+
+              <section className="card health">
+                <div className="health-ring">
+                  <Ring value={score} />
+                  <b>{score}</b>
                 </div>
-              </div>
-              <div className="oa-tiles">
-                <div className="oa-tile"><Ruler /><b>{Math.round(stats.areaM2)} m²</b><span>Hull cleaned</span></div>
-                <div className="oa-tile"><Shell /><b>{stats.removed}</b><span>Barnacles removed</span></div>
-                <div className="oa-tile"><Trash2 /><b>{stats.debrisKg.toFixed(1)} kg</b><span>Growth in the filter (est.)</span></div>
-                <div className="oa-tile"><Timer /><b>{fmt(stats.seconds)}</b><span>Robot on the hull</span></div>
-              </div>
+                <div className="health-text">
+                  <small>Hull condition</small>
+                  <h3>{score >= 80 ? 'Good' : score >= 60 ? 'Needs attention' : 'Act soon'}</h3>
+                  <p>{issues} new {issues === 1 ? 'finding' : 'findings'} since last month. The hull is clean and the scan is saved to your passport.</p>
+                </div>
+              </section>
 
-              <h3 className="oa-sec">Findings <span>tap for details</span></h3>
-              {y.findings.map((f) => (
-                <button key={f.id} className="oa-finding" onClick={() => setOpen(f)}>
-                  <Photo p={FINDING_PHOTOS[f.kind]} className="oa-thumb" credit={false} />
-                  <div>
-                    <b>{f.title}</b>
-                    <span className="w">{f.where}</span>
-                    {booked[f.id] ? <span className="chip ok"><i />Repair booked</span> : <span className={`chip ${f.severity}`}><i />{SEVERITY_LABEL[f.severity]}</span>}
-                  </div>
-                  <ChevronRight className="chev" />
-                </button>
-              ))}
-
-              <h3 className="oa-sec">Anodes</h3>
-              <div className="oa-card oa-anode">
-                <div className="row"><b>Zinc anodes</b><span className="pct">{y.anodePct}%</span></div>
-                <div className="track"><i style={{ width: `${y.anodePct}%`, background: y.anodePct < 40 ? '#FF6B4A' : '#E9A23B' }} /></div>
-                <p>{y.anodePct < 40 ? 'Replace them within a month. Below 50% they stop protecting the propellers and shafts properly.' : `Plan a replacement within ${y.anodePct < 60 ? 2 : 4} months. We replace them at 50%.`}</p>
+              <div className="tiles">
+                <div className="tile"><span className="tile-k"><Ruler style={{ color: '#0B7F84' }} />Cleaned</span><b>{Math.round(stats.areaM2)}<small> m²</small></b></div>
+                <div className="tile"><span className="tile-k"><Shell style={{ color: '#C77A2E' }} />Barnacles</span><b>{stats.removed}<small> removed</small></b></div>
+                <div className="tile"><span className="tile-k"><Trash2 style={{ color: '#5B7F3A' }} />In the filter</span><b>{stats.debrisKg.toFixed(1)}<small> kg est.</small></b></div>
+                <div className="tile"><span className="tile-k"><Timer style={{ color: '#5A5FD6' }} />On the hull</span><b>{fmt(stats.seconds)}<small> min</small></b></div>
               </div>
 
-              <h3 className="oa-sec">Hull map <span>seen from below</span></h3>
-              <div className="oa-card" style={{ padding: 10 }}>
-                <div className="oa-hullmap">
+              <h2 className="sec">Findings</h2>
+              <div className="list">
+                {y.findings.map((f) => (
+                  <button key={f.id} className="row find" onClick={() => setOpen(f)}>
+                    <Photo p={FINDING_PHOTOS[f.kind]} className="row-thumb" credit={false} />
+                    <span className="row-main"><b>{f.title}</b><span>{f.where}</span></span>
+                    {booked[f.id] ? <span className="pill ok">Booked</span> : <span className={`pill ${f.severity}`}>{SEVERITY_LABEL[f.severity]}</span>}
+                    <ChevronRight className="chev" />
+                  </button>
+                ))}
+              </div>
+
+              <h2 className="sec">Anodes</h2>
+              <section className="card anode">
+                <div className="anode-top"><span><Gauge />Zinc anodes</span><b>{y.anodePct}%</b></div>
+                <div className="track"><i style={{ width: `${y.anodePct}%`, background: y.anodePct < 40 ? '#E5533A' : '#D08A12' }} /><em style={{ left: '50%' }} /></div>
+                <p>{y.anodePct < 40 ? 'Replace within a month. Below 50% they stop protecting the propellers and shafts properly.' : `Plan a replacement within ${y.anodePct < 60 ? 2 : 4} months. We replace them at 50%.`}</p>
+              </section>
+
+              <h2 className="sec">Hull map <span>seen from below</span></h2>
+              <section className="card pad-s">
+                <div className="hullmap">
                   <img src={hullMap.img} alt={`Underside of MY ${y.name} with the findings marked`} />
                   {hullMap.pins.map((p, i) => (
                     <button key={p.id} className="pin" style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }} onClick={() => setOpen(y.findings.find((f) => f.id === p.id) ?? null)} aria-label={y.findings.find((f) => f.id === p.id)?.title}>{i + 1}</button>
                   ))}
                 </div>
-                <div className="oa-pinlist">
-                  {y.findings.map((f, i) => <button key={f.id} onClick={() => setOpen(f)}><i>{i + 1}</i>{f.title}<span>{f.side === 'centre' ? '' : f.side}</span></button>)}
+                <div className="pinlist">
+                  {y.findings.map((f, i) => <button key={f.id} onClick={() => setOpen(f)}><i>{i + 1}</i><span>{f.title}</span><em>{f.side}</em><ChevronRight className="chev" /></button>)}
+                </div>
+              </section>
+
+              <h2 className="sec">Coming up</h2>
+              <div className="list">
+                <div className="row">
+                  <Photo p={DIVER_PHOTO} className="row-thumb" credit={false} />
+                  <span className="row-main"><b>Annual Hull Review</b><span>A short video of your boat's year below the waterline, in December.</span></span>
+                </div>
+                <div className="row">
+                  <span className="row-icon" style={{ background: '#E6F4F4', color: '#0B7F84' }}><CalendarDays /></span>
+                  <span className="row-main"><b>Next dive</b><span>{new Date(Date.now() + 28 * 864e5).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</span></span>
                 </div>
               </div>
-
-              <div className="oa-card oa-review" style={{ marginTop: 4 }}>
-                <Photo p={DIVER_PHOTO} className="thumb" credit={false}><span className="cal-badge">DEC</span></Photo>
-                <p><b>Annual Hull Review</b><br />A short video of your boat's year below the waterline, and what to plan for next season.</p>
-              </div>
-              <p className="oa-credits">Photos: {hero.credit}, {y.findings.map((f) => FINDING_PHOTOS[f.kind].credit).join(', ')}, {DIVER_PHOTO.credit}.</p>
+              <p className="credits">Photos: {[hero.credit, ...y.findings.map((f) => FINDING_PHOTOS[f.kind].credit), DIVER_PHOTO.credit].filter((v, i, a) => a.indexOf(v) === i).join(' · ')}</p>
             </div>
           </>
         )}
@@ -137,7 +167,7 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
         {tab === 'pass' && <Passport y={y} levels={levels} />}
       </div>
 
-      <nav className="oa-tabs" role="tablist">
+      <nav className="tabbar" role="tablist">
         <button role="tab" aria-selected={tab === 'report'} onClick={() => go('report')}><Activity />Report</button>
         <button role="tab" aria-selected={tab === 'time'} onClick={() => go('time')}><History />Time-lapse</button>
         <button role="tab" aria-selected={tab === 'berth'} onClick={() => go('berth')}><Anchor />Berth</button>
@@ -157,9 +187,10 @@ export default function OwnerApp({ data, onRestart }: { data: AppData; onRestart
       )}
 
       {toast && (
-        <div className="oa-toast" role="status">
-          <span className="ico"><img src="/favicon.svg" alt="" /></span>
+        <div className="banner" role="status">
+          <span className="banner-ico"><img src="/favicon.svg" alt="" /></span>
           <div><b>{toast.title}</b><span>{toast.body}</span></div>
+          <small>now</small>
         </div>
       )}
     </div>
@@ -180,58 +211,62 @@ function FindingSheet({ y, f, hullMap, booked, onClose, onQuotes, onBook }: {
   };
   return (
     <>
-      <div className="oa-scrim" onClick={onClose} />
-      <div className="oa-sheet" role="dialog" aria-modal="true" aria-label={f.title}>
-        <div className="oa-grab" />
-        <div className="oa-sheet-head">
-          <div><h2>{f.title}</h2><p>New since scan {y.previousScanNo} · found by comparing the two scans</p></div>
-          <button className="oa-x" onClick={onClose} aria-label="Close"><X /></button>
+      <div className="scrim" onClick={onClose} />
+      <div className="sheet" role="dialog" aria-modal="true" aria-label={f.title}>
+        <div className="grabber" />
+        <div className="sheet-head">
+          <div>
+            <span className={`pill ${booked ? 'ok' : f.severity}`}>{booked ? 'Repair booked' : SEVERITY_LABEL[f.severity]}</span>
+            <h2>{f.title}</h2>
+            <p>New since scan {y.previousScanNo}</p>
+          </div>
+          <button className="xbtn" onClick={onClose} aria-label="Close"><X /></button>
         </div>
-        <div className="oa-compare">
-          {view === 'photo' ? (
-            <Photo p={photo} className="fill"><span className="stamp">SCAN {y.scanNo} · TODAY</span></Photo>
-          ) : (
-            <div className="oa-hullmap fill-map">
-              <img src={hullMap.img} alt={`Where the ${f.title.toLowerCase()} is on the hull`} />
-              {pin && <span className="pin big" style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%` }} />}
-              <span className="stamp">{f.where.toUpperCase()}</span>
-            </div>
-          )}
-        </div>
-        <div className="oa-seg" role="group" aria-label="Photo or position">
+        <div className="seg" role="group" aria-label="Photo or position">
           <button aria-pressed={view === 'photo'} onClick={() => setView('photo')}>Photo</button>
           <button aria-pressed={view === 'where'} onClick={() => setView('where')}>Where on the hull</button>
         </div>
-        <div className="oa-facts">
-          <div><small>Where</small><b>{f.where}</b></div>
-          <div><small>Size</small><b>{f.size}</b></div>
-          <div><small>Priority</small><b>{SEVERITY_LABEL[f.severity]}</b></div>
+        <div className="media">
+          {view === 'photo' ? (
+            <Photo p={photo} className="fill" />
+          ) : (
+            <div className="hullmap fill center">
+              <img src={hullMap.img} alt={`Where the ${f.title.toLowerCase()} is on the hull`} />
+              {pin && <span className="pin ring-pin" style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%` }} />}
+            </div>
+          )}
+        </div>
+        <div className="list inset">
+          <div className="kv"><span><MapPin />Where</span><b>{f.where}</b></div>
+          <div className="kv"><span><Ruler />Size</span><b>{f.size}</b></div>
+          <div className="kv"><span><Clock />Found</span><b>Scan {y.scanNo}, today</b></div>
         </div>
         <h4>What it means</h4>
-        <p className="t">{f.detail}</p>
+        <p className="body">{f.detail}</p>
         <h4>What to do</h4>
-        <p className="t">{f.action}</p>
-        <p className="oa-note">The scan screens for changes. A repair partner checks the damage on site before any work starts.</p>
+        <p className="body">{f.action}</p>
+        <p className="note">The scan screens for changes. A repair partner checks the damage on site before any work starts.</p>
         {booked ? (
-          <div className="oa-booked"><CheckCircle2 />Booked with {booked}</div>
+          <div className="booked"><CheckCircle2 />Booked with {booked}. We will check it on your next dive.</div>
         ) : stage === 'idle' ? (
-          <button className="oa-btn p" onClick={request}><Wrench />Get repair quotes</button>
+          <button className="btn-fill" onClick={request}><Wrench />Get repair quotes</button>
         ) : stage === 'sending' ? (
-          <div className="oa-spin"><i />Sending the scan to repair partners near Hurghada…</div>
+          <div className="spin"><i />Sending the scan to repair partners near Hurghada…</div>
         ) : (
           <>
-            <Photo p={YARD_PHOTO} className="oa-yard"><span className="oa-yard-label">Repair partners near Hurghada</span></Photo>
-            <h4 style={{ marginTop: 0 }}>{f.quotes.length} quotes · example partners</h4>
-            {f.quotes.map((q) => (
-              <div className="oa-quote" key={q.partner}>
-                <b>{q.partner}</b>
-                <span>{q.method}</span>
-                <div className="meta"><small><Clock />{q.when}</small><button onClick={() => onBook(q.partner)}>Choose</button></div>
-              </div>
-            ))}
+            <Photo p={YARD_PHOTO} className="yard"><span className="yard-label">Repair partners near Hurghada</span></Photo>
+            <h4>{f.quotes.length} quotes <span className="muted">· example partners</span></h4>
+            <div className="list">
+              {f.quotes.map((q) => (
+                <div className="quote" key={q.partner}>
+                  <div><b>{q.partner}</b><span>{q.method}</span><small><Clock />{q.when}</small></div>
+                  <button onClick={() => onBook(q.partner)}>Choose</button>
+                </div>
+              ))}
+            </div>
           </>
         )}
-        <button className="oa-btn s" onClick={onClose}>Close</button>
+        <button className="btn-plain" onClick={onClose}>Close</button>
       </div>
     </>
   );
@@ -240,49 +275,57 @@ function FindingSheet({ y, f, hullMap, booked, onClose, onQuotes, onBook }: {
 function TimeLapse({ y, plans, levels }: { y: Yacht; plans: string[]; levels: AppData['levels'] }) {
   const [i, setI] = useState(levels.months.length - 1);
   const n = levels.months.length;
-  const W = 320, H = 90;
-  const xs = (k: number) => 14 + (k * (W - 28)) / (n - 1);
-  const aPath = levels.anode.map((v, k) => `${k ? 'L' : 'M'}${xs(k).toFixed(1)} ${(H - 14 - ((v - 0) / 100) * (H - 26)).toFixed(1)}`).join(' ');
+  const W = 320, H = 110, B = H - 18, T = 8;
+  const xs = (k: number) => 16 + (k * (W - 32)) / (n - 1);
+  const yv = (v: number) => B - (v / 100) * (B - T);
+  const aPath = levels.anode.map((v, k) => `${k ? 'L' : 'M'}${xs(k).toFixed(1)} ${yv(v).toFixed(1)}`).join(' ');
+  const pct = (i / (n - 1)) * 100;
   return (
     <>
-      <div className="oa-title"><small>MY {y.name}</small><h1>Time-lapse</h1><p>Your hull at every monthly scan. Drag to move through the year.</p></div>
+      <LargeTitle eyebrow={`MY ${y.name}`} title="Time-lapse" sub="Your hull at every monthly scan. Drag through the year." />
       <div className="oa-body">
-        <div className="oa-card">
-          <div className="oa-plan">
+        <section className="card pad-s">
+          <div className="plan">
             <img src={plans[i]} alt={`Hull at the ${levels.months[i]} scan`} />
-            <span className="badge">Scan {y.scanNo - (n - 1 - i)} · {levels.months[i]}</span>
+            <span className="plan-badge">Scan {y.scanNo - (n - 1 - i)} · {levels.months[i]}</span>
           </div>
-          <input className="oa-range" type="range" min={0} max={n - 1} value={i} onChange={(e) => setI(+e.target.value)} aria-label="Choose a scan" />
-          <div className="oa-ticks">{levels.months.map((m, k) => <span key={k} className={k === i ? 'on' : ''}>{m}</span>)}</div>
-          <div className="oa-kv">
-            <div><small>Growth found</small><b>{growthWord(levels.growth[i])}</b></div>
-            <div><small>Anodes</small><b>{levels.anode[i]}%</b></div>
-            <div><small>Changes</small><b>{i === n - 1 ? `${y.findings.length} new` : 'None'}</b></div>
+          <div className="slider">
+            <input type="range" min={0} max={n - 1} value={i} onChange={(e) => setI(+e.target.value)} aria-label="Choose a scan" style={{ ['--p' as string]: `${pct}%` }} />
+            <div className="ticks">{levels.months.map((m, k) => <span key={k} className={k === i ? 'on' : ''}>{m}</span>)}</div>
           </div>
-          <div className="oa-event"><CalendarDays />{levels.events[i]}</div>
+        </section>
+        <div className="tiles three">
+          <div className="tile"><span className="tile-k">Growth found</span><b className="sm">{growthWord(levels.growth[i])}</b></div>
+          <div className="tile"><span className="tile-k">Anodes</span><b className="sm">{levels.anode[i]}%</b></div>
+          <div className="tile"><span className="tile-k">Changes</span><b className="sm">{i === n - 1 ? `${y.findings.length} new` : 'None'}</b></div>
         </div>
-        <div className="oa-card">
-          <b style={{ fontSize: 15 }}>Growth found before cleaning</b>
-          <svg className="oa-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Growth by month">
-            <line x1="0" x2={W} y1={H - 14} y2={H - 14} stroke="#E2E8E9" />
+        <div className="event"><Sparkles />{levels.events[i]}</div>
+
+        <h2 className="sec">Growth before cleaning</h2>
+        <section className="card">
+          <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Growth found at each scan">
+            {[0.5, 1].map((g) => <line key={g} x1="0" x2={W} y1={B - g * (B - T)} y2={B - g * (B - T)} stroke="#EFEDE8" />)}
+            <line x1="0" x2={W} y1={B} y2={B} stroke="#E2DFD8" />
             {levels.growth.map((g, k) => {
-              const h = g * (H - 26);
-              return <rect key={k} x={xs(k) - 9} y={H - 14 - h} width="18" height={h} rx="4" fill={k === i ? '#0A2233' : g > 0.8 ? '#FF6B4A' : g > 0.45 ? '#E9A23B' : '#19C3C9'} opacity={k === i ? 1 : 0.75} />;
+              const h = Math.max(4, g * (B - T));
+              return <rect key={k} x={xs(k) - 8} y={B - h} width="16" height={h} rx="5" fill={k === i ? '#0A2233' : '#9DCFD2'} />;
             })}
-            {levels.months.map((m, k) => <text key={k} x={xs(k)} y={H - 2} textAnchor="middle">{m}</text>)}
+            {levels.months.map((m, k) => <text key={k} x={xs(k)} y={H - 3} textAnchor="middle" className={k === i ? 'on' : ''}>{m}</text>)}
           </svg>
-        </div>
-        <div className="oa-card">
-          <b style={{ fontSize: 15 }}>Anode level</b>
-          <svg className="oa-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Anode level by month">
-            {[0, 50, 100].map((v) => <line key={v} x1="0" x2={W} y1={H - 14 - (v / 100) * (H - 26)} y2={H - 14 - (v / 100) * (H - 26)} stroke={v === 50 ? '#F2C7BD' : '#EEF2F3'} strokeDasharray={v === 50 ? '3 3' : undefined} />)}
-            <text x={W - 2} y={H - 14 - 0.5 * (H - 26) - 3} textAnchor="end">replace at 50%</text>
-            <path d={`${aPath} L ${xs(n - 1)} ${H - 14} L ${xs(0)} ${H - 14} Z`} fill="rgba(233,162,59,.12)" />
-            <path d={aPath} fill="none" stroke="#E9A23B" strokeWidth="2.2" />
-            <circle cx={xs(i)} cy={H - 14 - (levels.anode[i] / 100) * (H - 26)} r="4.5" fill="#0A2233" stroke="#fff" strokeWidth="2" />
-            {levels.months.map((m, k) => <text key={k} x={xs(k)} y={H - 2} textAnchor="middle">{m}</text>)}
+        </section>
+
+        <h2 className="sec">Anode level</h2>
+        <section className="card">
+          <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Anode level at each scan">
+            <line x1="0" x2={W} y1={yv(50)} y2={yv(50)} stroke="#F0C2B6" strokeDasharray="3 4" />
+            <text x={W - 2} y={yv(50) - 4} textAnchor="end">replace at 50%</text>
+            <line x1="0" x2={W} y1={B} y2={B} stroke="#E2DFD8" />
+            <path d={`${aPath} L ${xs(n - 1)} ${B} L ${xs(0)} ${B} Z`} fill="rgba(208,138,18,.10)" />
+            <path d={aPath} fill="none" stroke="#D08A12" strokeWidth="2.4" strokeLinejoin="round" />
+            <circle cx={xs(i)} cy={yv(levels.anode[i])} r="5" fill="#fff" stroke="#0A2233" strokeWidth="2.5" />
+            {levels.months.map((m, k) => <text key={k} x={xs(k)} y={H - 3} textAnchor="middle" className={k === i ? 'on' : ''}>{m}</text>)}
           </svg>
-        </div>
+        </section>
       </div>
     </>
   );
@@ -304,56 +347,62 @@ function Berth({ y, notify }: { y: Yacht; notify: (t: string, b: string) => void
   const now = new Date();
   return (
     <>
-      <div className="oa-title"><small>Pontoon {y.pontoon} · Hurghada Marina</small><h1>Berth {y.berth}</h1><p>What holds your yacht in place, checked in every marina scan.</p></div>
+      <LargeTitle eyebrow={`Pontoon ${y.pontoon} · Hurghada Marina`} title={`Berth ${y.berth}`} sub="What holds your yacht in place, checked in every marina scan." />
       <div className="oa-body">
-        <Photo p={MARINA_PHOTO} className="oa-berth-photo" />
-        <div className="oa-card" style={{ padding: 10 }}>
-          <svg className="oa-map" viewBox="0 0 340 240" role="img" aria-label={`Map of pontoon ${y.pontoon}`}>
-            {Array.from({ length: 6 }, (_, k) => <path key={k} d={`M0 ${150 + k * 15} Q 85 ${144 + k * 15} 170 ${150 + k * 15} T 340 ${150 + k * 15}`} fill="none" stroke="rgba(25,195,201,.12)" />)}
-            <rect x="14" y="34" width="312" height="16" rx="3" fill="#C9D4D8" />
-            <text x="16" y="24" fontSize="11" fontWeight="700" fill="#9DB2BC">PONTOON {y.pontoon}</text>
+        <div className="hero short">
+          <Photo p={MARINA_PHOTO} className="hero-photo" credit={false} />
+          <span className="hero-credit">{MARINA_PHOTO.credit}</span>
+        </div>
+        <section className="card pad-s">
+          <svg className="marina" viewBox="0 0 340 236" role="img" aria-label={`Map of pontoon ${y.pontoon}`}>
+            <rect x="0" y="0" width="340" height="236" rx="14" fill="#EAF3F4" />
+            {Array.from({ length: 6 }, (_, k) => <path key={k} d={`M0 ${150 + k * 15} Q 85 ${144 + k * 15} 170 ${150 + k * 15} T 340 ${150 + k * 15}`} fill="none" stroke="rgba(11,127,132,.08)" />)}
+            <rect x="14" y="30" width="312" height="16" rx="4" fill="#D9CFC0" />
+            <text x="16" y="22" fontSize="10.5" fontWeight="700" fill="#8E8A82" letterSpacing="1">PONTOON {y.pontoon}</text>
             {berths.map((b, k) => {
               const x = 34 + k * 44, me = b === my;
               return (
                 <g key={b}>
-                  <rect x={x - 2} y="50" width="4" height="74" fill="#8FA2AA" />
+                  <rect x={x - 2} y="46" width="4" height="76" rx="1" fill="#C9C1B4" />
                   {k < berths.length - 1 && (
                     <>
-                      <path d={`M${x + 22} 60 l -13 0 q -7 24 0 56 l 13 7 l 13 -7 q 7 -32 0 -56 z`} fill={me ? 'rgba(25,195,201,.25)' : 'rgba(238,241,238,.1)'} stroke={me ? '#19C3C9' : 'rgba(238,241,238,.35)'} strokeWidth={me ? 2 : 1} />
-                      <text x={x + 22} y="144" textAnchor="middle" fontSize={me ? 12 : 10} fontWeight={me ? 800 : 600} fill={me ? '#19C3C9' : '#7D909A'}>{y.pontoon}-{String(b).padStart(2, '0')}</text>
-                      <path d={`M${x + 22} 123 Q ${x + 31} 172 ${x + 25} 208`} fill="none" stroke={me ? '#19C3C9' : 'rgba(238,241,238,.25)'} strokeDasharray="2 4" strokeWidth="1.6" />
-                      <rect x={x + 17} y="208" width="16" height="8" fill={me ? '#19C3C9' : 'rgba(238,241,238,.3)'} />
+                      <path d={`M${x + 22} 56 l -13 0 q -7 24 0 56 l 13 7 l 13 -7 q 7 -32 0 -56 z`} fill={me ? '#0B7F84' : '#FFFFFF'} stroke={me ? '#0B7F84' : '#D8D4CC'} strokeWidth="1.2" />
+                      <text x={x + 22} y="142" textAnchor="middle" fontSize={me ? 11.5 : 10} fontWeight={me ? 700 : 500} fill={me ? '#0B7F84' : '#9A968E'}>{y.pontoon}-{String(b).padStart(2, '0')}</text>
+                      <path d={`M${x + 22} 121 Q ${x + 31} 170 ${x + 25} 204`} fill="none" stroke={me ? '#0B7F84' : '#CFCAC1'} strokeDasharray="2 4" strokeWidth="1.5" />
+                      <rect x={x + 17} y="204" width="16" height="8" rx="2" fill={me ? '#0B7F84' : '#CFCAC1'} />
                     </>
                   )}
                 </g>
               );
             })}
-            {facts.pile && <><circle cx={34 + 1 * 44} cy="42" r="8" fill="none" stroke="#FF6B4A" strokeWidth="2" /><circle cx={34 + 44} cy="42" r="2.6" fill="#FF6B4A" /></>}
-            <text x="330" y="234" textAnchor="end" fontSize="10" fill="#7D909A">depth {facts.depth} m</text>
+            {facts.pile && <><circle cx={34 + 44} cy="38" r="8" fill="#fff" stroke="#E5533A" strokeWidth="2" /><circle cx={34 + 44} cy="38" r="2.8" fill="#E5533A" /></>}
+            <text x="328" y="228" textAnchor="end" fontSize="10" fill="#8E8A82">depth {facts.depth} m</text>
             {storm === 'running' && Array.from({ length: 7 }, (_, k) => {
-              const yy = 60 + k * 24 + Math.sin(waveT / 2 + k) * 4;
-              return <path key={`w${k}`} d={`M0 ${yy} Q 42 ${yy - 10} 85 ${yy} T 170 ${yy} T 255 ${yy} T 340 ${yy}`} fill="none" stroke="rgba(238,241,238,.4)" strokeWidth="1.6" />;
+              const yy = 56 + k * 24 + Math.sin(waveT / 2 + k) * 4;
+              return <path key={`w${k}`} d={`M0 ${yy} Q 42 ${yy - 10} 85 ${yy} T 170 ${yy} T 255 ${yy} T 340 ${yy}`} fill="none" stroke="rgba(11,127,132,.35)" strokeWidth="1.5" />;
             })}
           </svg>
+        </section>
+
+        <div className="list">
+          <div className="row"><span className="row-icon" style={{ background: '#E6F4F4', color: '#0B7F84' }}><Link2 /></span><span className="row-main"><b>Mooring chain and block</b><span>Checked in the Q3 marina scan</span></span><span className="row-v">OK</span></div>
+          <div className="row"><span className="row-icon" style={{ background: '#E8F0FB', color: '#3D6FC4' }}><Waves /></span><span className="row-main"><b>Berth depth</b><span>No silting since the last scan</span></span><span className="row-v">{facts.depth} m</span></div>
+          <div className="row"><span className="row-icon" style={{ background: '#EEF6EA', color: '#4F8A3A' }}><LifeBuoy /></span><span className="row-main"><b>Pontoon floats</b><span>No change</span></span><span className="row-v">OK</span></div>
+          {facts.pile && <div className="row"><span className="row-icon" style={{ background: '#FDECE8', color: '#D2472F' }}><AlertTriangle /></span><span className="row-main"><b>Nearby: pile {y.pontoon}-{String(facts.pileNo).padStart(2, '0')}</b><span>Corrosion flagged for engineer review. The marina has been told.</span></span></div>}
         </div>
-        <div className="oa-card oa-rows">
-          <div className="oa-row"><span className="ic" style={{ background: '#DCF4F4', color: '#0B7F84' }}><Link2 /></span><div><b>Mooring chain and block</b><span>Checked in the Q3 marina scan</span></div><span className="v">OK</span></div>
-          <div className="oa-row"><span className="ic" style={{ background: '#DCF4F4', color: '#0B7F84' }}><Waves /></span><div><b>Berth depth</b><span>No silting since the last scan</span></div><span className="v">{facts.depth} m</span></div>
-          <div className="oa-row"><span className="ic" style={{ background: '#DCF4F4', color: '#0B7F84' }}><LifeBuoy /></span><div><b>Pontoon floats</b><span>No change</span></div><span className="v">OK</span></div>
-          {facts.pile && <div className="oa-row"><span className="ic" style={{ background: '#FFE8E2', color: '#C2401F' }}><AlertTriangle /></span><div><b>Nearby: pile {y.pontoon}-{String(facts.pileNo).padStart(2, '0')}</b><span>Corrosion flagged for engineer review. The marina has been told.</span></div><span className="v" /></div>}
-        </div>
-        <div className="oa-card">
-          <b style={{ fontSize: 16 }}>Storm Check</b>
-          <p style={{ margin: '4px 0 12px', fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.45 }}>After every storm the robot checks your boat and berth before you ask.</p>
-          {storm === 'idle' && <button className="oa-btn p" onClick={() => setStorm('running')}><CloudLightning />Simulate a storm</button>}
-          {storm === 'running' && <div className="oa-spin"><i />Storm passed. Checking chain, block and depth at {y.berth}…</div>}
+
+        <h2 className="sec">Storm Check</h2>
+        <section className="card">
+          <p className="card-p">After every storm the robot checks your boat and berth before you ask.</p>
+          {storm === 'idle' && <button className="btn-fill" onClick={() => setStorm('running')}><CloudLightning />Simulate a storm</button>}
+          {storm === 'running' && <div className="spin"><i />Storm passed. Checking chain, block and depth at {y.berth}…</div>}
           {storm === 'done' && (
             <>
-              <div className="oa-storm"><span className="ico"><img src="/favicon.svg" alt="" /></span><div><b>Storm check done.</b> Your boat and berth {y.berth}: <span style={{ color: 'var(--cyan-ink)', fontWeight: 650 }}>no changes.</span><small>Today {String(now.getHours()).padStart(2, '0')}:{String(now.getMinutes()).padStart(2, '0')} · chain, block and depth re-scanned</small></div></div>
-              <button className="oa-btn s" onClick={() => setStorm('running')}>Run it again</button>
+              <div className="msg"><span className="banner-ico"><img src="/favicon.svg" alt="" /></span><div><b>Storm check done.</b> Your boat and berth {y.berth}: <span className="good">no changes.</span><small>Today {String(now.getHours()).padStart(2, '0')}:{String(now.getMinutes()).padStart(2, '0')} · chain, block and depth re-scanned</small></div></div>
+              <button className="btn-plain" onClick={() => setStorm('running')}>Run it again</button>
             </>
           )}
-        </div>
+        </section>
       </div>
     </>
   );
@@ -364,52 +413,63 @@ function Passport({ y, levels }: { y: Yacht; levels: AppData['levels'] }) {
   const first = new Date();
   first.setMonth(first.getMonth() - (y.scanNo - 1));
   const items = useMemo(() => {
-    const out: { date: string; title: string; text: string }[] = [];
+    const out: { date: string; title: string; text: string; key?: boolean }[] = [];
     const n = levels.months.length;
     for (let k = 0; k < 6; k++) {
       const d = new Date(); d.setMonth(d.getMonth() - k);
       const idx = n - 1 - k;
       out.push({
-        date: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+        date: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
         title: `Scan ${y.scanNo - k}`,
         text: k === 0 ? `Cleaned · ${y.findings.length} new ${y.findings.length === 1 ? 'finding' : 'findings'}` : levels.events[idx] ?? 'Cleaned and scanned · no changes',
+        key: k === 0 || (levels.events[idx] ?? '').startsWith('Anodes'),
       });
     }
-    out.push({ date: first.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }), title: 'Scan 1', text: 'First dive · baseline scan of the hull' });
+    out.push({ date: first.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }), title: 'Scan 1', text: 'First dive · baseline scan of the hull', key: true });
     return out;
   }, [y, levels]);
   const share = async () => {
     const url = `${location.origin}/?name=${encodeURIComponent(y.owner)}`;
-    setQr(await QRCode.toDataURL(url, { margin: 1, width: 380, color: { dark: '#0A2233', light: '#FFFFFF' } }));
+    setQr(await QRCode.toDataURL(url, { margin: 1, width: 380, color: { dark: '#1C1C1E', light: '#FFFFFF' } }));
   };
   return (
     <>
-      <div className="oa-title"><small>Proof for buyers, brokers and insurers</small><h1>Hull Passport</h1></div>
+      <LargeTitle eyebrow="Proof for buyers, brokers and insurers" title="Hull Passport" />
       <div className="oa-body">
-        <div className="oa-book">
-          <Photo p={yachtPhoto(y)} className="oa-book-photo" credit={false} />
-          <img src="/logo-white.png" alt="" style={{ width: 120, position: 'relative' }} />
-          <small>HULL PASSPORT</small>
-          <h2>MY {y.name}</h2>
-          <span>{y.lengthFt} ft · {y.scanNo} scans since {first.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</span>
-        </div>
-        <div className="oa-card">
-          <b style={{ fontSize: 16 }}>Scan history</b>
-          <div className="oa-time" style={{ marginTop: 8 }}>
-            {items.map((it) => (
-              <div className="oa-ti" key={it.title}><time>{it.date}</time><span className="dotline"><i /></span><div><b>{it.title}</b><span>{it.text}</span></div></div>
-            ))}
+        <div className="book">
+          <Photo p={yachtPhoto(y)} className="book-photo" credit={false} />
+          <div className="book-in">
+            <img src="/logo-white.png" alt="UNDERSEEN" />
+            <div>
+              <small>HULL PASSPORT</small>
+              <h2>MY {y.name}</h2>
+              <span>{y.lengthFt} ft {y.style} · {y.scanNo} scans since {first.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</span>
+            </div>
           </div>
         </div>
-        <div className="oa-card">
-          <b style={{ fontSize: 16 }}>Selling the boat?</b>
-          <p style={{ margin: '4px 0 12px', fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.45 }}>Share the full scan history with a buyer, broker or insurer.</p>
+
+        <h2 className="sec">Scan history</h2>
+        <section className="card">
+          <div className="timeline">
+            {items.map((it) => (
+              <div className={`tl${it.key ? ' key' : ''}`} key={it.title}>
+                <time>{it.date}</time>
+                <span className="tl-dot"><i /></span>
+                <div><b>{it.title}</b><span>{it.text}</span></div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <h2 className="sec">Selling the boat?</h2>
+        <section className="card">
+          <p className="card-p">Share the full scan history with a buyer, broker or insurer.</p>
           {qr ? (
-            <div className="oa-qr"><img src={qr} alt="QR code for this Hull Passport" /><p>Scan to open MY {y.name} in UNDERSEEN.<br />Demo: it opens this yacht in the simulator.</p></div>
+            <div className="qr"><img src={qr} alt="QR code for this Hull Passport" /><p>Scan to open MY {y.name} in UNDERSEEN.<br />Demo: it opens this yacht in the simulator.</p></div>
           ) : (
-            <button className="oa-btn c" onClick={share}><Share2 />Share with a buyer</button>
+            <button className="btn-fill" onClick={share}><Share2 />Share with a buyer</button>
           )}
-        </div>
+        </section>
       </div>
     </>
   );

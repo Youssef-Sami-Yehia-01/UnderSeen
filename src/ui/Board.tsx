@@ -19,13 +19,13 @@ export default function Board() {
     <div className="page">
       <div className="board">
         <div className="board-head">
-          <img src="/logo-white.png" alt="UNDERSEEN" style={{ height: 54 }} />
-          <span style={{ color: '#9db2bc', fontSize: 14 }}>Live · updates every 5 seconds</span>
+          <img src="/logo-navy.png" alt="UNDERSEEN" style={{ height: 54 }} />
+          <span style={{ color: 'var(--ink-3)', fontSize: 14 }}>Live · updates every 5 seconds</span>
         </div>
         {loaded && !enabled && (
           <div className="glass" style={{ padding: 22, lineHeight: 1.5 }}>
             <b style={{ fontSize: 18 }}>Visitor saving is off.</b>
-            <p style={{ margin: '6px 0 0', color: '#c9d7dd' }}>The simulator works without it. To count visitors and show a leaderboard, add the free <b>Upstash for Redis</b> store to this project in Vercel (Storage → Create → Upstash), then redeploy.</p>
+            <p style={{ margin: '6px 0 0', color: 'var(--ink-2)' }}>The simulator works without it. To count visitors and show a leaderboard, add the free <b>Upstash for Redis</b> store to this project in Vercel (Storage → Create → Upstash), then redeploy.</p>
           </div>
         )}
         <div className="board-kpis">
@@ -37,12 +37,12 @@ export default function Board() {
           <div className="board-list glass">
             <h3>Fastest cleaners</h3>
             {(s?.board ?? []).map((b, i) => <div className="board-row" key={b.name + i}><span className="rank">{i + 1}</span>{b.name}<span className="v">{fmt(b.seconds)}</span></div>)}
-            {!s?.board?.length && <p style={{ color: '#9db2bc', margin: 0 }}>No finished dives yet.</p>}
+            {!s?.board?.length && <p style={{ color: 'var(--ink-3)', margin: 0 }}>No finished dives yet.</p>}
           </div>
           <div className="board-list glass">
             <h3>Just dived</h3>
             {(s?.recent ?? []).map((r, i) => <div className="board-row" key={r.name + r.at + i}>{r.name}<span className="v">MY {r.yacht}</span></div>)}
-            {!s?.recent?.length && <p style={{ color: '#9db2bc', margin: 0 }}>Waiting for the first visitor.</p>}
+            {!s?.recent?.length && <p style={{ color: 'var(--ink-3)', margin: 0 }}>Waiting for the first visitor.</p>}
           </div>
         </div>
       </div>

@@ -13,13 +13,13 @@ export default function QRPage() {
     <div className="page">
       <div className="qr-wrap">
         <div style={{ display: 'grid', gap: 26, justifyItems: 'center' }}>
-          <img src="/logo-white.png" alt="UNDERSEEN" style={{ width: 'min(320px, 70vw)' }} />
+          <img src="/logo-navy.png" alt="UNDERSEEN" style={{ width: 'min(320px, 70vw)' }} />
           <div className="qr-card">
             {img && <img className="qr" src={img} alt={`QR code for ${url}`} />}
             <b style={{ fontSize: 22 }}>Scan to dive under your yacht</b>
             <span className="url">{url.replace(/^https?:\/\//, '')}</span>
           </div>
-          <p style={{ color: '#9db2bc', fontSize: 14, margin: 0 }}>Right-click the code and save it, or take a screenshot for your slides.</p>
+          <p style={{ color: 'var(--ink-3)', fontSize: 14, margin: 0 }}>Right-click the code and save it, or take a screenshot for your slides.</p>
         </div>
       </div>
     </div>

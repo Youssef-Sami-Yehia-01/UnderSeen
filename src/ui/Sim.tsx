@@ -163,12 +163,11 @@ export default function Sim() {
       <div className="stage" ref={mount} />
 
       {/* top bar */}
-      {(phase === 'landing' || phase === 'intro') && <div className="scrim-top" />}
       <div className="topbar">
         {phase === 'clean' || phase === 'dive' || phase === 'scan' || phase === 'result' ? (
           <span className="live"><i />{phase === 'scan' ? '3D SCAN' : 'LIVE · ROBOT CAM'}<span className="sep" />{fmtTime(st?.seconds ?? 0)}</span>
         ) : phase === 'app' || phase === 'ping' ? <span /> : (
-          <div className="brand"><img src="/logo-white.png" alt="UNDERSEEN" /></div>
+          <div className="brand"><img src="/logo-navy.png" alt="UNDERSEEN" /></div>
         )}
         {phase !== 'app' && (
           <button className="iconbtn" onClick={toggleMute} aria-label={muted ? 'Turn sound on' : 'Turn sound off'}>
@@ -229,7 +228,7 @@ export default function Sim() {
           </div>
           <div className="hud-panel glass">
             <div className="hud-head"><h2>Clean the hull</h2><span>{st ? `${Math.round(st.areaM2)} m² done` : ''}</span></div>
-            <div className="seg" role="group" aria-label="Cleaning tool">
+            <div className="tools" role="group" aria-label="Cleaning tool">
               <button aria-pressed={tool === 'auto'} onClick={() => { setTool('auto'); exp.current?.setTool('auto'); }}><Sparkles />Auto<span className="sub">picks the tool</span></button>
               <button aria-pressed={tool === 'brush'} onClick={() => { setTool('brush'); exp.current?.setTool('brush'); }}><Paintbrush />Brush<span className="sub">soft growth</span></button>
               <button className="jet" aria-pressed={tool === 'jet'} onClick={() => { setTool('jet'); exp.current?.setTool('jet'); }}><Waves />Jet<span className="sub">barnacles</span></button>

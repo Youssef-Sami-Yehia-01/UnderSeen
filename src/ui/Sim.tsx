@@ -343,7 +343,7 @@ export default function Sim() {
             </div>
             <div className="result-actions">
               <button className="btn btn-ghost" onClick={() => exp.current?.playTimelapse()}><Film />Watch the timelapse</button>
-              <button className="btn btn-primary" onClick={sendReport}>Send the report to my phone <ArrowRight /></button>
+              <button className="btn btn-primary" onClick={sendReport}>Submit Report <ArrowRight /></button>
             </div>
             <p className="fineprint">Drag to look around the scan. Coral marks what changed since the last scan.</p>
           </div>
